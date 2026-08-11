@@ -7,9 +7,10 @@ const db = require('../db/db');
 const { genisTabloOku } = require('./genisTablo');
 const { key } = require('../../shared/tr');
 
-async function gecmisiAktar(dosyalar, { uzerineYaz = true } = {}) {
+async function gecmisiAktar(dosyalar, { uzerineYaz = true, siralamayiAl = true } = {}) {
   const sonuc = {
-    dosyalar: [], toplamKayit: 0, gunler: [], yeniIsletmeler: [], uyarilar: [],
+    dosyalar: [], toplamKayit: 0, gunler: [], yeniIsletmeler: [],
+    siralandi: 0, uyarilar: [],
   };
 
   for (const dosya of dosyalar) {
@@ -27,6 +28,13 @@ async function gecmisiAktar(dosyalar, { uzerineYaz = true } = {}) {
       }
     }
     const isl = db.isletmeHaritasi();
+
+    if (siralamayiAl && okuma.isletmeler.length) {
+      const idler = okuma.isletmeler
+        .map((ad) => (isl.get(key(ad)) || {}).id)
+        .filter(Boolean);
+      sonuc.siralandi = db.isletmeSirala(idler);
+    }
 
     const gunlerBuDosya = [...new Set(okuma.kayitlar.map((k) => k.tarih))].sort();
 

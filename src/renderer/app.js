@@ -21,6 +21,8 @@ const IKON = {
   uyari: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
   sol: '<path d="m15 18-6-6 6-6"/>',
   sag: '<path d="m9 18 6-6-6-6"/>',
+  yukari: '<path d="m18 15-6-6-6 6"/>',
+  asagi: '<path d="m6 9 6 6 6-6"/>',
 };
 
 const svg = (ad, sinif = '') =>
@@ -793,6 +795,11 @@ async function sayfaGecmis() {
               Aynı günler varsa üzerine yaz
             </label>
           </div>
+          <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+            <input type="checkbox" id="siralamayiAl" checked class="size-4 accent-[#3ecf8e]" />
+            İşletme sıralamasını bu dosyadaki sıraya göre ayarla
+            <span class="text-fg-3">— ekranda ve Excel çıktısında bu sıra kullanılır</span>
+          </label>
           <div class="rounded-md border border-line bg-bg-200 p-3 text-[11.5px] text-fg-3">
             Aktarım sadece <b>dolu</b> hücreleri kaydeder. Tanınmayan kategori adları atlanır ve
             aşağıda listelenir.
@@ -810,7 +817,10 @@ async function sayfaGecmis() {
     btn.innerHTML = 'Okunuyor… (büyük dosyalarda biraz sürebilir)';
     el('gecmisSonuc').innerHTML = `<div class="card p-4 text-fg-3">İşleniyor…</div>`;
     try {
-      const r = await cagir(api.gecmisAktar(dosyalar, { uzerineYaz: el('uzerineYaz2').checked }));
+      const r = await cagir(api.gecmisAktar(dosyalar, {
+        uzerineYaz: el('uzerineYaz2').checked,
+        siralamayiAl: el('siralamayiAl').checked,
+      }));
       el('gecmisSonuc').innerHTML = `
         <div class="card">
           <div class="card-head"><div class="font-medium">Aktarım tamam</div>
@@ -821,6 +831,7 @@ async function sayfaGecmis() {
               <b>${r.gunler.length}</b> gün
               ${r.gunler.length ? `(${tarihYaz(r.gunler[0])} – ${tarihYaz(r.gunler[r.gunler.length - 1])})` : ''}</div>
             ${r.yeniIsletmeler.length ? `<div class="text-warn">Yeni işletme eklendi: ${r.yeniIsletmeler.map(kacar).join(', ')}</div>` : ''}
+            ${r.siralandi ? `<div class="text-fg-3">İşletme sıralaması dosyadaki sıraya göre ayarlandı (${r.siralandi} satır).</div>` : ''}
             ${r.uyarilar.length ? `<div class="space-y-0.5 text-[11.5px] text-warn">${r.uyarilar.map((u) => `<div>${kacar(u)}</div>`).join('')}</div>` : ''}
           </div>
         </div>`;
@@ -1032,18 +1043,43 @@ async function sayfaAyarlar() {
 
       <div class="card overflow-hidden">
         <div class="card-head">
-          <div class="font-medium">İşletmeler</div>
+          <div>
+            <div class="font-medium">İşletmeler</div>
+            <div class="text-[11.5px] text-fg-3">
+              Bu sıra ekrandaki tabloda ve Excel çıktısında kullanılır</div>
+          </div>
           <span class="text-[11.5px] text-fg-3">${isletmeler.length} kayıt</span>
         </div>
         <div class="flex gap-2 border-b border-line p-3">
           <input id="isEkleAd" class="input flex-1" placeholder="Yeni işletme adı" />
           <button class="btn btn-brand" id="isEkle">${svg('ekle', 'size-4')} Ekle</button>
+          <button class="btn" id="siraYapistirAc">Sırayı yapıştır</button>
         </div>
-        <div class="max-h-64 overflow-auto">
+        <div id="siraYapistir" class="hidden border-b border-line p-3">
+          <div class="mb-2 text-[12px] text-fg-3">
+            Her satıra bir işletme adı. Bu sıra uygulanır; listede olmayanlar eklenir,
+            listede geçmeyen mevcut işletmeler sona alınır. Sıra kaydedilir ve sonraki
+            açılışlarda korunur.
+          </div>
+          <textarea id="siraMetin" rows="8"
+                    class="input w-full font-mono text-[11.5px]"
+                    placeholder="BALYA&#10;DURSUNBEY&#10;SAVAŞTEPE&#10;…"></textarea>
+          <div class="mt-2 flex items-center gap-2">
+            <button class="btn btn-brand" id="siraUygula">Sırayı uygula</button>
+            <button class="btn" id="siraMevcut">Mevcut sırayı yaz</button>
+            <button class="btn-ghost btn" id="siraKapat">Vazgeç</button>
+          </div>
+        </div>
+        <div class="max-h-80 overflow-auto">
           <table class="tbl"><tbody>
-            ${isletmeler.map((i) => `<tr>
+            ${isletmeler.map((i, ix) => `<tr>
+              <td class="w-8 text-fg-3">${ix + 1}</td>
               <td>${kacar(i.ad)}</td>
-              <td class="w-10 text-right">
+              <td class="w-28 text-right whitespace-nowrap">
+                <button class="btn-ghost btn btn-sm" data-tasi="${i.id}" data-yon="-1"
+                        ${ix === 0 ? 'disabled' : ''} title="Yukarı">${svg('yukari', 'size-3.5')}</button>
+                <button class="btn-ghost btn btn-sm" data-tasi="${i.id}" data-yon="1"
+                        ${ix === isletmeler.length - 1 ? 'disabled' : ''} title="Aşağı">${svg('asagi', 'size-3.5')}</button>
                 <button class="btn-ghost btn btn-sm" data-isil="${i.id}"
                         title="Sil — bu işletmenin tüm kayıtları da silinir">${svg('sil', 'size-3.5')}</button>
               </td></tr>`).join('') ||
@@ -1078,6 +1114,31 @@ async function sayfaAyarlar() {
     try { await cagir(api.isletmeEkle(ad)); bildir(`"${kacar(ad)}" eklendi.`, 'basari'); sayfaAyarlar(); }
     catch (e) { bildir(kacar(e.message), 'hata'); }
   };
+
+  el('siraYapistirAc').onclick = () => el('siraYapistir').classList.toggle('hidden');
+  el('siraKapat').onclick = () => el('siraYapistir').classList.add('hidden');
+  el('siraMevcut').onclick = () => {
+    el('siraMetin').value = isletmeler.map((i) => i.ad).join('\n');
+  };
+  el('siraUygula').onclick = async () => {
+    const satirlar = el('siraMetin').value.split('\n').map((s) => s.trim()).filter(Boolean);
+    if (!satirlar.length) return bildir('Liste boş.', 'hata');
+    try {
+      const r = await cagir(api.isletmeSiralaAdlar(satirlar));
+      bildir(`Sıra uygulandı: <b>${r.siralandi}</b> işletme.`
+        + (r.eklendi.length ? `<br>Yeni eklenen: ${kacar(r.eklendi.join(', '))}` : ''), 'basari');
+      sayfaAyarlar();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  document.querySelectorAll('[data-tasi]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await cagir(api.isletmeTasi(Number(b.dataset.tasi), Number(b.dataset.yon)));
+        sayfaAyarlar();
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
 
   document.querySelectorAll('[data-isil]').forEach((b) => {
     b.onclick = async () => {

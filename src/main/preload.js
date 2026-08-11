@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('api', {
   eslesmeGeriYukle: () => cagir('eslesmeGeriYukle'),
   isletmeEkle: (ad) => cagir('isletmeEkle', ad),
   isletmeSil: (id) => cagir('isletmeSil', id),
+  isletmeTasi: (id, yon) => cagir('isletmeTasi', id, yon),
+  isletmeSirala: (idler) => cagir('isletmeSirala', idler),
+  isletmeSiralaAdlar: (adlar, s) => cagir('isletmeSiralaAdlar', adlar, s),
   vtYedekle: () => cagir('vtYedekle'),
 
   oneriler: (tarih) => cagir('oneriler', tarih),

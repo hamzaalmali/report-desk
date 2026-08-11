@@ -108,6 +108,9 @@ kanal('eslesmeEkle', (p) => { db.eslesmeEkle(p); return db.eslesmeler(); });
 kanal('eslesmeSil', (id) => { db.eslesmeSil(id); return db.eslesmeler(); });
 kanal('isletmeEkle', (ad) => { db.isletmeEkle(ad); return db.isletmeler(); });
 kanal('isletmeSil', (id) => { db.isletmeSil(id); return db.isletmeler(); });
+kanal('isletmeTasi', (id, yon) => db.isletmeTasi(id, yon));
+kanal('isletmeSirala', (idler) => { db.isletmeSirala(idler); return db.isletmeler(); });
+kanal('isletmeSiralaAdlar', (adlar, s) => db.isletmeSiralaAdlar(adlar, s));
 
 kanal('eslesmeYedekle', async () => {
   const r = await dialog.showSaveDialog(pencere, {

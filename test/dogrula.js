@@ -71,6 +71,28 @@ async function main() {
   kontrol('her işletme için birebir kural kuruldu',
     db.eslesmeler().length === db.isletmeler().length);
 
+  const dosyaSirasi = okuma.isletmeler.join('|');
+  kontrol('işletme sırası kaynak dosyayla birebir',
+    db.isletmeler().map((i) => i.ad).join('|') === dosyaSirasi);
+
+  db.isletmeEkle('ZZZ TEST');
+  db.isletmeTasi(db.isletmeler()[0].id, 1);
+  kontrol('elle sıralama ilk iki satırı yer değiştiriyor',
+    db.isletmeler()[1].ad === okuma.isletmeler[0]
+    && db.isletmeler()[0].ad === okuma.isletmeler[1]);
+  await gecmisiAktar([KAYNAK]);
+  kontrol('yeniden aktarım sırayı dosyaya geri döndürüyor',
+    db.isletmeler().slice(0, okuma.isletmeler.length).map((i) => i.ad).join('|') === dosyaSirasi);
+  db.isletmeSil(db.isletmeler().find((i) => i.ad === 'ZZZ TEST').id);
+
+  const tersi = [...okuma.isletmeler].reverse();
+  const y = db.isletmeSiralaAdlar(tersi);
+  kontrol('ada göre sıralama listeyi birebir uyguluyor',
+    db.isletmeler().map((i) => i.ad).join('|') === tersi.join('|'), `${y.siralandi} satır`);
+  db.isletmeSiralaAdlar(okuma.isletmeler);
+  kontrol('sıra dosya sırasına geri döndü',
+    db.isletmeler().map((i) => i.ad).join('|') === dosyaSirasi);
+
   console.log("\nExcel'e aktarma (gidiş-dönüş)");
   const ay = db.aylar()[0].ay;
   const cikti = path.join(gecici, 'cikti.xlsx');
@@ -92,6 +114,9 @@ async function main() {
   for (const [k, v] of kaynak) if (uretilen.get(k) !== v) fark++;
   for (const k of uretilen.keys()) if (!kaynak.has(k)) fark++;
   kontrol(`${ay} çıktısı kaynakla birebir`, fark === 0, `${fark} fark`);
+  kontrol('çıktıdaki işletme sırası kaynak dosyayla aynı',
+    geri.isletmeler.join('|') === okuma.isletmeler.join('|'),
+    geri.isletmeler.slice(0, 5).join(', '));
 
   console.log('\nGünlük rapor aktarımı');
   const gunlukDosyalar = fs.readdirSync(KOK)

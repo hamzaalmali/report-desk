@@ -70,6 +70,58 @@ function isletmeSil(id) {
   db.run('DELETE FROM isletme WHERE id = :id', { ':id': id });
 }
 
+function isletmeSirala(idler) {
+  if (!Array.isArray(idler) || !idler.length) return 0;
+  let n = 0;
+  islem(() => {
+    const st = db.prepare('UPDATE isletme SET sira = :s WHERE id = :id');
+    idler.forEach((id, i) => { st.run({ ':s': i + 1, ':id': id }); n++; });
+    st.finalize();
+    const kalan = db.all(
+      'SELECT id FROM isletme WHERE id NOT IN (' + idler.map(() => '?').join(',') + ') ORDER BY sira, id',
+      idler
+    );
+    const st2 = db.prepare('UPDATE isletme SET sira = :s WHERE id = :id');
+    kalan.forEach((r, i) => st2.run({ ':s': idler.length + i + 1, ':id': r.id }));
+    st2.finalize();
+  });
+  return n;
+}
+
+function isletmeSiralaAdlar(adlar, { eksikleriEkle = true } = {}) {
+  const temiz = (Array.isArray(adlar) ? adlar : String(adlar).split(/\r?\n/))
+    .map((a) => String(a).trim())
+    .filter(Boolean);
+  if (!temiz.length) throw new Error('Liste boş.');
+
+  const sonuc = { siralandi: 0, eklendi: [], bulunamadi: [] };
+  islem(() => {
+    const idler = [];
+    for (const ad of temiz) {
+      const harita = isletmeHaritasi();
+      const mevcut = harita.get(key(ad));
+      if (mevcut) idler.push(mevcut.id);
+      else if (eksikleriEkle) {
+        const yeni = isletmeEkle(ad);
+        if (yeni) { idler.push(yeni.id); sonuc.eklendi.push(ad); }
+      } else sonuc.bulunamadi.push(ad);
+    }
+    sonuc.siralandi = isletmeSirala(idler);
+  });
+  return sonuc;
+}
+
+function isletmeTasi(id, yon) {
+  const liste = isletmeler();
+  const ix = liste.findIndex((i) => i.id === id);
+  const hedef = ix + (yon < 0 ? -1 : 1);
+  if (ix < 0 || hedef < 0 || hedef >= liste.length) return liste;
+  const yeni = liste.map((i) => i.id);
+  yeni.splice(hedef, 0, yeni.splice(ix, 1)[0]);
+  isletmeSirala(yeni);
+  return isletmeler();
+}
+
 function isletmeler() {
   return db.all('SELECT id, ad, sira, aktif FROM isletme ORDER BY sira, id');
 }
@@ -318,8 +370,19 @@ function ozet() {
   return { ...g, ...b, sonGun: son ? son.tarih : null, isletme: sayi('isletme'), yol: dbYolu };
 }
 
+let islemDerinlik = 0;
+
 function islem(fn) {
+  if (islemDerinlik > 0) {
+    islemDerinlik++;
+    try {
+      return fn();
+    } finally {
+      islemDerinlik--;
+    }
+  }
   db.run('BEGIN');
+  islemDerinlik = 1;
   try {
     const r = fn();
     db.run('COMMIT');
@@ -327,6 +390,8 @@ function islem(fn) {
   } catch (e) {
     db.run('ROLLBACK');
     throw e;
+  } finally {
+    islemDerinlik = 0;
   }
 }
 
@@ -337,7 +402,7 @@ function yol() {
 module.exports = {
   ac, kur, yol, get raw() { return db; }, islem,
   isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
-  isletmeEkle, isletmeSil,
+  isletmeEkle, isletmeSil, isletmeSirala, isletmeTasi, isletmeSiralaAdlar,
   gunler, aylar, gunVerisi, ayVerisi,
   kayitYaz, hucreGuncelle, gunKategoriAc, gunSil, kategoriSifirla,
   eslesmeler, eslesmeEkle, eslesmeSil, eslesmeleriDisaAktar, eslesmeleriIceAktar,
