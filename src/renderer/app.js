@@ -157,17 +157,43 @@ function vtHatasiCiz(durum) {
           </div>
         </div>
         <div class="space-y-4 p-5 text-[12.5px]">
+          ${durum.tani && durum.tani.tesis ? `
+            <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12.5px]">
+              <b>Muhtemel sebep:</b> ${kacar(durum.tani.tesis)}
+            </div>` : ''}
+
           <div class="rounded-md border border-line bg-bg-200 p-3 font-mono text-[11.5px] text-danger">
             ${kacar(durum.hata)}
           </div>
-          <div class="text-fg-2">Dosya: <span class="font-mono text-[11px] text-fg-3">${kacar(durum.yol)}</span></div>
+
+          <table class="w-full text-[11.5px]">
+            <tbody>
+              ${[
+                ['Dosya', durum.yol],
+                ['Sürüm', durum.surum],
+                ...(durum.tani ? [
+                  ['Klasör yazılabilir mi', durum.tani.yazilabilir === false
+                    ? 'HAYIR — ' + (durum.tani.yazmaHatasi || '') : 'evet'],
+                  ['Veritabanı motoru', durum.tani.motorCalisiyor === false
+                    ? 'YÜKLENEMEDİ — ' + (durum.tani.motorHatasi || '') : 'çalışıyor'],
+                  ['Dosya boyutu', durum.tani.dosyaBoyutu === null
+                    ? 'dosya yok' : durum.tani.dosyaBoyutu + ' bayt'],
+                  ['Yol uzunluğu', durum.tani.uzunluk + ' karakter'],
+                ] : []),
+              ].map(([a, b]) => `<tr class="border-t border-line">
+                  <td class="w-52 py-1.5 text-fg-3">${kacar(a)}</td>
+                  <td class="py-1.5 font-mono text-fg-2">${kacar(b)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+
           <div class="text-fg-2">
             <b>Onar</b> derseniz mevcut dosya silinmez; adının sonuna <span class="font-mono">.bozuk-…</span>
             eklenerek bir kenara alınır ve program boş bir veritabanıyla açılır.
-            Kenara alınan dosyayı sonra inceleyebiliriz.
           </div>
-          <div class="flex gap-2">
+
+          <div class="flex flex-wrap gap-2">
             <button class="btn btn-brand" id="vtOnar">Onar ve yeniden dene</button>
+            <button class="btn" id="vtKopyala">Hata raporunu kopyala</button>
             <button class="btn" id="vtKlasor">Klasörde göster</button>
             <button class="btn" id="vtGunluk">Günlük dosyasını göster</button>
           </div>
@@ -183,6 +209,10 @@ function vtHatasiCiz(durum) {
   };
   el('vtKlasor').onclick = () => api.klasorAc(durum.yol);
   el('vtGunluk').onclick = () => api.gunluguAc();
+  el('vtKopyala').onclick = async () => {
+    await api.panoyaKopyala(JSON.stringify(durum, null, 2));
+    bildir('Hata raporu panoya kopyalandı — yapıştırıp gönderebilirsiniz.', 'basari');
+  };
 }
 
 async function git(id) {

@@ -13,6 +13,7 @@ const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
 let dbHatasi = null;
+let dbTani = null;
 
 app.setName('report-desk');
 
@@ -130,14 +131,94 @@ function pencereOlustur() {
   });
 }
 
-function veritabaniniAc() {
+function tanila(dosyaYolu) {
+  const klasor = path.dirname(dosyaYolu);
+  const b = { yol: dosyaYolu, klasor, uzunluk: dosyaYolu.length, platform: process.platform };
+
   try {
-    db.ac(VERI_DOSYASI());
-    kayit(`Veritabanı açıldı: ${VERI_DOSYASI()}`);
-    dbHatasi = null;
+    fs.mkdirSync(klasor, { recursive: true });
+    b.klasorVar = true;
   } catch (e) {
-    dbHatasi = hataYaz('veritabanı', e);
+    b.klasorVar = false;
+    b.klasorHatasi = e.message;
   }
+
+  try {
+    b.dosyaBoyutu = fs.statSync(dosyaYolu).size;
+  } catch {
+    b.dosyaBoyutu = null;
+  }
+
+  try {
+    const deneme = path.join(klasor, 'yazma-testi.tmp');
+    fs.writeFileSync(deneme, 'x');
+    fs.unlinkSync(deneme);
+    b.yazilabilir = true;
+  } catch (e) {
+    b.yazilabilir = false;
+    b.yazmaHatasi = e.message;
+  }
+
+  try {
+    const { Database } = require('node-sqlite3-wasm');
+    const gecici = new Database(':memory:');
+    gecici.run('CREATE TABLE t(a)');
+    gecici.close();
+    b.motorCalisiyor = true;
+  } catch (e) {
+    b.motorCalisiyor = false;
+    b.motorHatasi = e.message;
+  }
+
+  return b;
+}
+
+function tesis(bilgi) {
+  if (bilgi.motorCalisiyor === false) {
+    return 'Veritabanı motoru (SQLite) yüklenemedi. Kurulum eksik ya da bir güvenlik '
+         + 'yazılımı engelliyor olabilir. Programı kaldırıp yeniden kurmayı deneyin.';
+  }
+  if (bilgi.yazilabilir === false) {
+    return 'Programın veri klasörüne yazma izni yok. Klasör: ' + bilgi.klasor;
+  }
+  if (bilgi.dosyaBoyutu === 0) {
+    return 'Veri dosyası boş (0 bayt) — büyük olasılıkla önceki bir kapanmada bozulmuş. '
+         + '"Onar" düğmesi dosyayı kenara alıp yenisini kurar.';
+  }
+  if (bilgi.dosyaBoyutu > 0) {
+    return 'Veri dosyası var ama okunamıyor; içeriği bozulmuş olabilir. '
+         + '"Onar" düğmesi dosyayı kenara alıp yenisini kurar, eski dosya silinmez.';
+  }
+  return 'Veri dosyası oluşturulamadı.';
+}
+
+function veritabaniniAc() {
+  const yollar = [VERI_DOSYASI()];
+  const yedekKlasor = path.join(app.getPath('documents'), 'report-desk');
+  yollar.push(path.join(yedekKlasor, 'veri.sqlite'));
+
+  let ilkHata = null;
+  let ilkBilgi = null;
+
+  for (const y of yollar) {
+    try {
+      db.ac(y);
+      kayit(`Veritabanı açıldı: ${y}`);
+      dbHatasi = null;
+      dbTani = null;
+      return;
+    } catch (e) {
+      const metin = hataYaz(`veritabanı (${y})`, e);
+      const bilgi = tanila(y);
+      kayit('Teşhis: ' + JSON.stringify(bilgi));
+      if (!ilkHata) { ilkHata = metin; ilkBilgi = bilgi; }
+      // Dosya bozuksa ikinci konumu denemenin anlamı yok, kullanıcı onarmalı
+      if (bilgi.motorCalisiyor !== false && bilgi.yazilabilir !== false) break;
+    }
+  }
+
+  dbHatasi = ilkHata;
+  dbTani = { ...ilkBilgi, tesis: tesis(ilkBilgi || {}) };
 }
 
 app.whenReady().then(() => {
@@ -265,7 +346,18 @@ kanal('surum', () => ({
   tasinabilir: !!process.env.PORTABLE_EXECUTABLE_DIR,
 }), true);
 
-kanal('vtDurum', () => ({ hata: dbHatasi, yol: VERI_DOSYASI(), gunluk: GUNLUK_DOSYASI() }), true);
+kanal('vtDurum', () => ({
+  hata: dbHatasi,
+  tani: dbTani,
+  yol: db.yol() || VERI_DOSYASI(),
+  gunluk: GUNLUK_DOSYASI(),
+  surum: app.getVersion(),
+}), true);
+
+kanal('panoyaKopyala', (metin) => {
+  require('electron').clipboard.writeText(String(metin));
+  return true;
+}, true);
 
 kanal('vtOnar', () => {
   const kaynak = VERI_DOSYASI();
