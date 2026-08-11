@@ -285,4 +285,47 @@ kanal('vtOnar', () => {
 }, true);
 
 kanal('gunluguAc', () => { shell.showItemInFolder(GUNLUK_DOSYASI()); return true; }, true);
+
+kanal('hepsiniSifirla', async () => {
+  const secim = process.env.UI_TEST ? { response: 1 } : await dialog.showMessageBox(pencere, {
+    type: 'warning',
+    buttons: ['Vazgeç', 'Her şeyi sıfırla'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Her şeyi sıfırla',
+    message: 'Tüm bilgiler silinecek',
+    detail: 'Bütün günler, işaretlemeler, işletme listesi, eşleştirme kuralları, öneriler '
+      + 've işlem günlüğü silinir. Program ilk kurulduğu hâline döner.\n\n'
+      + 'Silmeden önce mevcut veri dosyasının bir yedeği aynı klasöre bırakılır.',
+    noLink: true,
+  });
+  if (secim.response !== 1) return { iptal: true };
+
+  db.kapat();
+  const kaynak = VERI_DOSYASI();
+  let yedek = null;
+  if (fs.existsSync(kaynak)) {
+    const damga = new Date().toISOString().replace(/[:.]/g, '-');
+    yedek = `${kaynak}.yedek-${damga}`;
+    fs.renameSync(kaynak, yedek);
+  }
+  for (const ek of ['-journal', '-wal', '-shm']) {
+    const y = kaynak + ek;
+    if (fs.existsSync(y)) fs.unlinkSync(y);
+  }
+
+  veritabaniniAc();
+  if (dbHatasi) throw new Error(dbHatasi);
+
+  try {
+    const { session } = require('electron');
+    await session.defaultSession.clearStorageData();
+    await session.defaultSession.clearCache();
+  } catch (e) {
+    hataYaz('önbellek temizleme', e);
+  }
+
+  kayit(`Her şey sıfırlandı. Yedek: ${yedek || '(dosya yoktu)'}`);
+  return { iptal: false, yedek };
+}, true);
 kanal('guncellemeKontrol', () => guncellemeKontrol());

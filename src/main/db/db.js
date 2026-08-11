@@ -421,8 +421,15 @@ function yol() {
   return dbYolu;
 }
 
+function kapat() {
+  if (db) {
+    try { db.close(); } catch { }
+    db = null;
+  }
+}
+
 module.exports = {
-  ac, kur, yol, get raw() { return db; }, islem,
+  ac, kur, yol, kapat, get raw() { return db; }, islem,
   isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
   isletmeEkle, isletmeSil, isletmeSirala, isletmeTasi, isletmeSiralaAdlar,
   gunler, aylar, gunVerisi, ayVerisi,

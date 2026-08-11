@@ -1170,6 +1170,23 @@ async function sayfaAyarlar() {
         </div>
       </div>
 
+      <div class="card border-danger/40">
+        <div class="card-head bg-danger/10">
+          <div>
+            <div class="font-medium">Her şeyi sıfırla</div>
+            <div class="text-[11.5px] text-fg-3">Program ilk kurulduğu hâline döner</div>
+          </div>
+          <button class="btn border-danger/60 bg-danger/20 hover:bg-danger/30" id="hepsiniSifirla">
+            ${svg('sil', 'size-4')} Sıfırla
+          </button>
+        </div>
+        <div class="p-5 text-[12.5px] text-fg-2">
+          Bütün günler, işaretlemeler, işletme listesi, eşleştirme kuralları, öneriler,
+          işlem günlüğü ve program önbelleği silinir; varsayılan işletme listesi yeniden kurulur.
+          <span class="text-fg-3">Silmeden önce mevcut veri dosyasının yedeği aynı klasöre bırakılır.</span>
+        </div>
+      </div>
+
       <div class="card overflow-hidden">
         <div class="card-head"><div class="font-medium">İşlem günlüğü</div></div>
         <div class="max-h-72 overflow-auto p-3 font-mono text-[11px] text-fg-3">
@@ -1183,6 +1200,25 @@ async function sayfaAyarlar() {
 
   el('vtAc').onclick = () => api.klasorAc(surum.vt);
   el('gunlukAc').onclick = () => api.gunluguAc();
+
+  el('hepsiniSifirla').onclick = async () => {
+    const b = el('hepsiniSifirla');
+    b.disabled = true;
+    try {
+      const r = await cagir(api.hepsiniSifirla());
+      if (r.iptal) return;
+      localStorage.clear();
+      bildir('Her şey sıfırlandı.'
+        + (r.yedek ? `<br><span class="text-fg-3">Yedek: ${kacar(r.yedek)}</span>` : ''), 'basari');
+      D.tarih = null;
+      D.ay = null;
+      git('genel');
+    } catch (e) {
+      bildir(kacar(e.message), 'hata');
+    } finally {
+      b.disabled = false;
+    }
+  };
 
   el('vtYedek').onclick = async () => {
     try {
