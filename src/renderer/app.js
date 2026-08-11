@@ -143,7 +143,52 @@ function panelKapat() {
   el('panelKatman').classList.add('hidden');
 }
 
+function vtHatasiCiz(durum) {
+  el('sayfaBaslik').textContent = 'Veritabanı açılamadı';
+  el('sayfaAlt').textContent = 'Program çalışıyor, veri dosyası okunamıyor';
+  el('navAraclar').innerHTML = '';
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 overflow-auto">
+      <div class="card border-danger/50">
+        <div class="card-head bg-danger/10">
+          <div class="flex items-center gap-2">
+            <span class="text-danger">${svg('uyari', 'size-5')}</span>
+            <div class="font-medium">Veri dosyası açılamadı</div>
+          </div>
+        </div>
+        <div class="space-y-4 p-5 text-[12.5px]">
+          <div class="rounded-md border border-line bg-bg-200 p-3 font-mono text-[11.5px] text-danger">
+            ${kacar(durum.hata)}
+          </div>
+          <div class="text-fg-2">Dosya: <span class="font-mono text-[11px] text-fg-3">${kacar(durum.yol)}</span></div>
+          <div class="text-fg-2">
+            <b>Onar</b> derseniz mevcut dosya silinmez; adının sonuna <span class="font-mono">.bozuk-…</span>
+            eklenerek bir kenara alınır ve program boş bir veritabanıyla açılır.
+            Kenara alınan dosyayı sonra inceleyebiliriz.
+          </div>
+          <div class="flex gap-2">
+            <button class="btn btn-brand" id="vtOnar">Onar ve yeniden dene</button>
+            <button class="btn" id="vtKlasor">Klasörde göster</button>
+            <button class="btn" id="vtGunluk">Günlük dosyasını göster</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  el('vtOnar').onclick = async () => {
+    try {
+      await cagir(api.vtOnar());
+      bildir('Veritabanı yeniden oluşturuldu.', 'basari');
+      git('genel');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+  el('vtKlasor').onclick = () => api.klasorAc(durum.yol);
+  el('vtGunluk').onclick = () => api.gunluguAc();
+}
+
 async function git(id) {
+  const durum = await cagir(api.vtDurum());
+  if (durum.hata) { menuCiz(); return vtHatasiCiz(durum); }
+
   D.sayfa = id;
   menuCiz();
   const s = SAYFALAR.find((x) => x.id === id);
@@ -1070,9 +1115,10 @@ async function sayfaAyarlar() {
           <div class="flex justify-between"><span class="text-fg-2">Gün</span><span>${ozet.gun}</span></div>
           <div class="flex justify-between"><span class="text-fg-2">Kayıt</span><span>${ozet.kayit}</span></div>
           <div class="flex justify-between"><span class="text-fg-2">İşletme</span><span>${ozet.isletme}</span></div>
-          <div class="mt-3 flex gap-2">
+          <div class="mt-3 flex flex-wrap gap-2">
             <button class="btn" id="vtAc">Klasörde göster</button>
             <button class="btn btn-brand" id="vtYedek">Yedek al</button>
+            <button class="btn" id="gunlukAc">Başlangıç günlüğü</button>
           </div>
         </div>
       </div>
@@ -1136,6 +1182,7 @@ async function sayfaAyarlar() {
     </div>`;
 
   el('vtAc').onclick = () => api.klasorAc(surum.vt);
+  el('gunlukAc').onclick = () => api.gunluguAc();
 
   el('vtYedek').onclick = async () => {
     try {

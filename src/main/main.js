@@ -12,12 +12,52 @@ const { aylikDisaAktar } = require('./export/excelDisaAktar');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
+let dbHatasi = null;
 
 app.setName('report-desk');
 
 const VERI_DOSYASI = () => path.join(app.getPath('userData'), 'veri.sqlite');
+const GUNLUK_DOSYASI = () => path.join(app.getPath('userData'), 'baslangic.log');
+
+function kayit(mesaj) {
+  const satir = `${new Date().toISOString()}  ${mesaj}`;
+  try {
+    fs.mkdirSync(path.dirname(GUNLUK_DOSYASI()), { recursive: true });
+    fs.appendFileSync(GUNLUK_DOSYASI(), satir + '\n');
+  } catch { }
+  console.log(satir);
+}
+
+function hataYaz(nerede, hata) {
+  const metin = hata && hata.stack ? hata.stack : String(hata);
+  kayit(`HATA ${nerede}: ${metin}`);
+  return metin;
+}
+
+process.on('uncaughtException', (e) => {
+  const metin = hataYaz('uncaughtException', e);
+  try {
+    dialog.showErrorBox('Rapor Masası — beklenmeyen hata',
+      `${metin}\n\nAyrıntı: ${GUNLUK_DOSYASI()}`);
+  } catch { }
+});
+process.on('unhandledRejection', (e) => hataYaz('unhandledRejection', e));
+
+if (!app.requestSingleInstanceLock()) {
+  kayit('Zaten çalışan bir kopya var, bu kopya kapatılıyor.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (pencere && !pencere.isDestroyed()) {
+      if (pencere.isMinimized()) pencere.restore();
+      pencere.show();
+      pencere.focus();
+    }
+  });
+}
 
 function pencereOlustur() {
+  kayit('Pencere oluşturuluyor');
   pencere = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -35,14 +75,37 @@ function pencereOlustur() {
     },
   });
 
-  pencere.loadFile(path.join(__dirname, '../renderer/index.html'));
-  pencere.once('ready-to-show', () => pencere.show());
+  let gosterildi = false;
+  const goster = (neden) => {
+    if (gosterildi || !pencere || pencere.isDestroyed()) return;
+    gosterildi = true;
+    kayit(`Pencere gösteriliyor (${neden})`);
+    pencere.show();
+  };
 
-  if (!app.isPackaged) {
-    pencere.webContents.on('console-message', (_o, seviye, mesaj, satir, kaynak) => {
-      console.log(`[renderer:${seviye}] ${mesaj} (${kaynak}:${satir})`);
-    });
-  }
+  pencere.once('ready-to-show', () => goster('ready-to-show'));
+  pencere.webContents.once('did-finish-load', () => goster('did-finish-load'));
+  setTimeout(() => goster('zaman aşımı'), 4000);
+
+  pencere.webContents.on('did-fail-load', (_o, kod, aciklama, url) => {
+    hataYaz('did-fail-load', `${kod} ${aciklama} ${url}`);
+    goster('did-fail-load');
+  });
+  pencere.webContents.on('render-process-gone', (_o, ayrinti) => {
+    hataYaz('render-process-gone', JSON.stringify(ayrinti));
+    try {
+      dialog.showErrorBox('Rapor Masası — arayüz çöktü',
+        `Sebep: ${ayrinti.reason}\n\nAyrıntı: ${GUNLUK_DOSYASI()}`);
+    } catch { }
+  });
+  pencere.webContents.on('preload-error', (_o, yol, hata) => hataYaz('preload', `${yol} ${hata}`));
+  pencere.webContents.on('console-message', (_o, seviye, mesaj, satir, kaynak) => {
+    if (seviye >= 2) kayit(`[arayüz] ${mesaj} (${kaynak}:${satir})`);
+    else if (!app.isPackaged) console.log(`[renderer] ${mesaj}`);
+  });
+
+  pencere.loadFile(path.join(__dirname, '../renderer/index.html'))
+    .catch((e) => { hataYaz('loadFile', e); goster('loadFile hatası'); });
 
   if (process.env.UI_TEST) {
     pencere.webContents.once('did-finish-load', () => {
@@ -50,7 +113,7 @@ function pencereOlustur() {
         const betik = process.env.UI_TEST !== '1'
           ? process.env.UI_TEST
           : path.join(__dirname, '../../test/dom-kontrol.js');
-        const js = require('node:fs').readFileSync(betik, 'utf8');
+        const js = fs.readFileSync(betik, 'utf8');
         try {
           console.log('TEST>>' + JSON.stringify(await pencere.webContents.executeJavaScript(js)));
         } catch (e) {
@@ -67,26 +130,47 @@ function pencereOlustur() {
   });
 }
 
+function veritabaniniAc() {
+  try {
+    db.ac(VERI_DOSYASI());
+    kayit(`Veritabanı açıldı: ${VERI_DOSYASI()}`);
+    dbHatasi = null;
+  } catch (e) {
+    dbHatasi = hataYaz('veritabanı', e);
+  }
+}
+
 app.whenReady().then(() => {
-  db.ac(VERI_DOSYASI());
+  kayit(`--- Başlangıç · sürüm ${app.getVersion()} · ${process.platform} ---`);
   pencereOlustur();
-  guncellemeyiKur(() => pencere);
+  veritabaniniAc();
+  try {
+    guncellemeyiKur(() => pencere);
+  } catch (e) {
+    hataYaz('güncelleme kurulumu', e);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) pencereOlustur();
   });
+}).catch((e) => {
+  const metin = hataYaz('whenReady', e);
+  try {
+    dialog.showErrorBox('Rapor Masası açılamadı', `${metin}\n\nAyrıntı: ${GUNLUK_DOSYASI()}`);
+  } catch { }
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-function kanal(ad, fn) {
+function kanal(ad, fn, vtGerekmez = false) {
   ipcMain.handle(ad, async (_olay, ...args) => {
+    if (dbHatasi && !vtGerekmez) return { ok: false, hata: dbHatasi, vtHatasi: true };
     try {
       return { ok: true, veri: await fn(...args) };
     } catch (hata) {
-      console.error(ad, hata);
+      hataYaz(ad, hata);
       return { ok: false, hata: hata.message || String(hata) };
     }
   });
@@ -175,7 +259,30 @@ kanal('excelDisaAktar', async (ay) => {
 kanal('klasorAc', (dosya) => { shell.showItemInFolder(dosya); return true; });
 kanal('surum', () => ({
   surum: app.getVersion(),
-  vt: db.ozet().yol,
+  vt: dbHatasi ? VERI_DOSYASI() : db.ozet().yol,
+  gunluk: GUNLUK_DOSYASI(),
+  vtHatasi: dbHatasi,
   tasinabilir: !!process.env.PORTABLE_EXECUTABLE_DIR,
-}));
+}), true);
+
+kanal('vtDurum', () => ({ hata: dbHatasi, yol: VERI_DOSYASI(), gunluk: GUNLUK_DOSYASI() }), true);
+
+kanal('vtOnar', () => {
+  const kaynak = VERI_DOSYASI();
+  if (fs.existsSync(kaynak)) {
+    const damga = new Date().toISOString().replace(/[:.]/g, '-');
+    const hedef = `${kaynak}.bozuk-${damga}`;
+    fs.renameSync(kaynak, hedef);
+    kayit(`Bozuk veritabanı bir kenara alındı: ${hedef}`);
+  }
+  for (const ek of ['-journal', '-wal', '-shm']) {
+    const y = kaynak + ek;
+    if (fs.existsSync(y)) fs.unlinkSync(y);
+  }
+  veritabaniniAc();
+  if (dbHatasi) throw new Error(dbHatasi);
+  return true;
+}, true);
+
+kanal('gunluguAc', () => { shell.showItemInFolder(GUNLUK_DOSYASI()); return true; }, true);
 kanal('guncellemeKontrol', () => guncellemeKontrol());

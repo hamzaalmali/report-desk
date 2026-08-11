@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('api', {
   klasorAc: (dosya) => cagir('klasorAc', dosya),
 
   surum: () => cagir('surum'),
+  vtDurum: () => cagir('vtDurum'),
+  vtOnar: () => cagir('vtOnar'),
+  gunluguAc: () => cagir('gunluguAc'),
   guncellemeKontrol: () => cagir('guncellemeKontrol'),
   guncellemeDinle: (fn) => {
     ipcRenderer.on('guncelleme', (_o, veri) => fn(veri));
