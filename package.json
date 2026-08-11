@@ -1,0 +1,85 @@
+{
+  "name": "report-desk",
+  "version": "1.0.1",
+  "description": "Günlük rapor takibi — yerel veritabanı ve form arayüzü",
+  "author": "Hamza Almalı",
+  "license": "UNLICENSED",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "npm run css && electron .",
+    "css": "tailwindcss -i src/renderer/input.css -o src/renderer/styles.css --minify",
+    "css:watch": "tailwindcss -i src/renderer/input.css -o src/renderer/styles.css --watch",
+    "test": "node test/dogrula.js",
+    "dist": "npm run css && electron-builder --win --publish never",
+    "release": "npm run css && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2",
+    "exceljs": "^4.4.0",
+    "node-sqlite3-wasm": "^0.8.60"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "electron": "^32.3.3",
+    "electron-builder": "^25.1.8",
+    "tailwindcss": "^4.3.3"
+  },
+  "allowScripts": {
+    "electron@32.3.3": true
+  },
+  "build": {
+    "appId": "com.reportdesk.app",
+    "productName": "Report Desk",
+    "copyright": "© Rapor Masası",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "!src/renderer/input.css",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "ReportDesk-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "ReportDesk-Portable-${version}.${ext}",
+      "requestExecutionLevel": "user"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Report Desk",
+      "installerLanguages": [
+        "tr_TR"
+      ],
+      "language": "1055"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "hamzaalmali",
+        "repo": "report-desk",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

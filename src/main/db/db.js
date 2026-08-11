@@ -1,0 +1,345 @@
+// Hamza ALMALI
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { Database } = require('node-sqlite3-wasm');
+const { KATEGORILER } = require('../../shared/kategoriler');
+const { key } = require('../../shared/tr');
+
+let db = null;
+let dbYolu = null;
+
+function ac(dosyaYolu) {
+  if (db) db.close();
+  dbYolu = dosyaYolu;
+  fs.mkdirSync(path.dirname(dosyaYolu), { recursive: true });
+  db = new Database(dosyaYolu);
+  db.run('PRAGMA foreign_keys = ON');
+  kur();
+  return db;
+}
+
+function kur() {
+  const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+  db.exec(sql);
+  kategorileriSenkronla();
+}
+
+function sayi(tablo) {
+  return db.get(`SELECT COUNT(*) AS c FROM ${tablo}`).c;
+}
+
+function kategorileriSenkronla() {
+  const st = db.prepare(
+    `INSERT INTO kategori (kod, ad, genislik, otomatik, sira)
+     VALUES (:kod, :ad, :genislik, :otomatik, :sira)
+     ON CONFLICT(kod) DO UPDATE SET
+       ad = excluded.ad, genislik = excluded.genislik,
+       otomatik = excluded.otomatik, sira = excluded.sira`
+  );
+  for (const k of KATEGORILER) {
+    st.run({
+      ':kod': k.kod, ':ad': k.ad, ':genislik': k.genislik,
+      ':otomatik': k.otomatik ? 1 : 0, ':sira': k.sira,
+    });
+  }
+  st.finalize();
+}
+
+function isletmeEkle(ad, sira) {
+  ad = String(ad || '').trim();
+  if (!ad) throw new Error('İşletme adı boş olamaz.');
+  const enBuyuk = db.get('SELECT COALESCE(MAX(sira), 0) AS s FROM isletme').s;
+  db.run('INSERT OR IGNORE INTO isletme (ad, sira) VALUES (:ad, :s)', {
+    ':ad': ad, ':s': sira == null ? enBuyuk + 1 : sira,
+  });
+  const i = db.get('SELECT id FROM isletme WHERE ad = :ad', { ':ad': ad });
+  if (i) {
+    db.run(
+      `INSERT OR IGNORE INTO eslesme (kaynak_deger, isletme_id, tip)
+       VALUES (:k, :i, 'TAM')`,
+      { ':k': ad, ':i': i.id }
+    );
+  }
+  return i;
+}
+
+function isletmeSil(id) {
+  db.run('DELETE FROM isletme WHERE id = :id', { ':id': id });
+}
+
+function isletmeler() {
+  return db.all('SELECT id, ad, sira, aktif FROM isletme ORDER BY sira, id');
+}
+
+function kategoriler() {
+  return db.all('SELECT id, kod, ad, genislik, otomatik, sira FROM kategori ORDER BY sira');
+}
+
+function isletmeHaritasi() {
+  const m = new Map();
+  for (const i of isletmeler()) m.set(key(i.ad), i);
+  return m;
+}
+
+function kategoriHaritasi() {
+  const m = new Map();
+  for (const k of kategoriler()) m.set(k.kod, k);
+  return m;
+}
+
+function gunler() {
+  return db
+    .all(
+      `SELECT tarih,
+              COUNT(*) AS kayit,
+              SUM(ariza_var + tutanak_gerekli) AS isaret,
+              SUM(ariza_var_bekliyor + donus_saglandi_bekliyor
+                  + tutanak_gerekli_bekliyor + tutanak_eklendi_bekliyor) AS bekleyen
+       FROM kayit GROUP BY tarih ORDER BY tarih DESC`
+    );
+}
+
+function aylar() {
+  return db.all(
+    `SELECT substr(tarih,1,7) AS ay, COUNT(DISTINCT tarih) AS gun
+     FROM kayit GROUP BY ay ORDER BY ay DESC`
+  );
+}
+
+function gunVerisi(tarih) {
+  const satirlar = db.all(
+    `SELECT k.*, i.ad AS isletme, i.sira AS isletme_sira, kt.kod AS kategori_kod
+     FROM kayit k
+     JOIN isletme i  ON i.id  = k.isletme_id
+     JOIN kategori kt ON kt.id = k.kategori_id
+     WHERE k.tarih = :tarih`,
+    { ':tarih': tarih }
+  );
+  const acikKategoriler = db
+    .all(
+      `SELECT kt.kod FROM gun_kategori g JOIN kategori kt ON kt.id = g.kategori_id
+       WHERE g.tarih = :tarih ORDER BY kt.sira`,
+      { ':tarih': tarih }
+    )
+    .map((r) => r.kod);
+  return { tarih, satirlar, acikKategoriler };
+}
+
+function ayVerisi(ay) {
+  return db.all(
+    `SELECT k.tarih, i.ad AS isletme, kt.kod AS kategori_kod,
+            k.ariza_var, k.donus_saglandi, k.tutanak_gerekli, k.tutanak_eklendi,
+            k.ariza_var_bekliyor, k.donus_saglandi_bekliyor,
+            k.tutanak_gerekli_bekliyor, k.tutanak_eklendi_bekliyor
+     FROM kayit k
+     JOIN isletme i   ON i.id  = k.isletme_id
+     JOIN kategori kt ON kt.id = k.kategori_id
+     WHERE substr(k.tarih,1,7) = :ay
+     ORDER BY k.tarih, i.sira, kt.sira`,
+    { ':ay': ay }
+  );
+}
+
+const ALANLAR = [
+  'ariza_var', 'donus_saglandi', 'tutanak_gerekli', 'tutanak_eklendi',
+  'ariza_var_bekliyor', 'donus_saglandi_bekliyor',
+  'tutanak_gerekli_bekliyor', 'tutanak_eklendi_bekliyor',
+];
+
+function kayitYaz(kayitlar) {
+  const st = db.prepare(
+    `INSERT INTO kayit (tarih, isletme_id, kategori_id,
+        ariza_var, donus_saglandi, tutanak_gerekli, tutanak_eklendi,
+        ariza_var_bekliyor, donus_saglandi_bekliyor,
+        tutanak_gerekli_bekliyor, tutanak_eklendi_bekliyor, aciklama)
+     VALUES (:tarih, :isletme_id, :kategori_id,
+        :ariza_var, :donus_saglandi, :tutanak_gerekli, :tutanak_eklendi,
+        :ariza_var_bekliyor, :donus_saglandi_bekliyor,
+        :tutanak_gerekli_bekliyor, :tutanak_eklendi_bekliyor, :aciklama)
+     ON CONFLICT(tarih, isletme_id, kategori_id) DO UPDATE SET
+        ariza_var = excluded.ariza_var,
+        donus_saglandi = excluded.donus_saglandi,
+        tutanak_gerekli = excluded.tutanak_gerekli,
+        tutanak_eklendi = excluded.tutanak_eklendi,
+        ariza_var_bekliyor = excluded.ariza_var_bekliyor,
+        donus_saglandi_bekliyor = excluded.donus_saglandi_bekliyor,
+        tutanak_gerekli_bekliyor = excluded.tutanak_gerekli_bekliyor,
+        tutanak_eklendi_bekliyor = excluded.tutanak_eklendi_bekliyor,
+        aciklama = COALESCE(excluded.aciklama, kayit.aciklama),
+        guncelleme = datetime('now')`
+  );
+  let n = 0;
+  for (const k of kayitlar) {
+    const p = {
+      ':tarih': k.tarih, ':isletme_id': k.isletme_id, ':kategori_id': k.kategori_id,
+      ':aciklama': k.aciklama == null ? null : String(k.aciklama),
+    };
+    for (const a of ALANLAR) p[':' + a] = k[a] ? 1 : 0;
+    st.run(p);
+    n++;
+  }
+  st.finalize();
+  return n;
+}
+
+function hucreGuncelle({ tarih, isletme_id, kategori_id, alan, deger }) {
+  if (!ALANLAR.includes(alan)) throw new Error('Geçersiz alan: ' + alan);
+  db.run(
+    `INSERT INTO kayit (tarih, isletme_id, kategori_id, ${alan})
+     VALUES (:tarih, :isletme_id, :kategori_id, :deger)
+     ON CONFLICT(tarih, isletme_id, kategori_id) DO UPDATE SET
+       ${alan} = :deger, guncelleme = datetime('now')`,
+    {
+      ':tarih': tarih, ':isletme_id': isletme_id,
+      ':kategori_id': kategori_id, ':deger': deger ? 1 : 0,
+    }
+  );
+  return db.get(
+    `SELECT * FROM kayit WHERE tarih = :t AND isletme_id = :i AND kategori_id = :k`,
+    { ':t': tarih, ':i': isletme_id, ':k': kategori_id }
+  );
+}
+
+function gunKategoriAc(tarih, kategoriIdler) {
+  const st = db.prepare(
+    'INSERT OR IGNORE INTO gun_kategori (tarih, kategori_id) VALUES (:t, :k)'
+  );
+  for (const id of kategoriIdler) st.run({ ':t': tarih, ':k': id });
+  st.finalize();
+}
+
+function gunSil(tarih) {
+  db.run('DELETE FROM kayit WHERE tarih = :t', { ':t': tarih });
+  db.run('DELETE FROM gun_kategori WHERE tarih = :t', { ':t': tarih });
+  db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
+}
+
+function kategoriSifirla(tarih, kategoriId) {
+  db.run(
+    `DELETE FROM kayit WHERE tarih = :t AND kategori_id = :k`,
+    { ':t': tarih, ':k': kategoriId }
+  );
+}
+
+function eslesmeler() {
+  return db.all(
+    `SELECT e.id, e.kaynak_deger, e.tip, i.ad AS isletme, e.isletme_id
+     FROM eslesme e JOIN isletme i ON i.id = e.isletme_id
+     ORDER BY e.kaynak_deger`
+  );
+}
+
+function eslesmeEkle({ kaynak_deger, isletme_id, tip }) {
+  db.run(
+    `INSERT INTO eslesme (kaynak_deger, isletme_id, tip) VALUES (:k, :i, :t)
+     ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id`,
+    { ':k': kaynak_deger.trim(), ':i': isletme_id, ':t': tip === 'İÇERİR' ? 'İÇERİR' : 'TAM' }
+  );
+}
+
+function eslesmeSil(id) {
+  db.run('DELETE FROM eslesme WHERE id = :id', { ':id': id });
+}
+
+function eslesmeleriDisaAktar() {
+  return {
+    surum: 1,
+    olusturma: new Date().toISOString(),
+    isletmeler: isletmeler().map((i) => ({ ad: i.ad, sira: i.sira })),
+    eslesmeler: eslesmeler().map((e) => ({
+      kaynak_deger: e.kaynak_deger, isletme: e.isletme, tip: e.tip,
+    })),
+  };
+}
+
+function eslesmeleriIceAktar(veri) {
+  if (!veri || !Array.isArray(veri.eslesmeler)) {
+    throw new Error('Dosya tanınmadı: eşleştirme yedeği değil.');
+  }
+  let isletme = 0, eslesme = 0;
+  islem(() => {
+    for (const i of veri.isletmeler || []) {
+      const varMi = db.get('SELECT id FROM isletme WHERE ad = :ad', { ':ad': i.ad });
+      if (!varMi) { isletmeEkle(i.ad, i.sira); isletme++; }
+    }
+    const harita = isletmeHaritasi();
+    for (const e of veri.eslesmeler) {
+      const hedef = harita.get(key(e.isletme));
+      if (!hedef) continue;
+      db.run(
+        `INSERT INTO eslesme (kaynak_deger, isletme_id, tip) VALUES (:k, :i, :t)
+         ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id`,
+        { ':k': e.kaynak_deger, ':i': hedef.id, ':t': e.tip === 'İÇERİR' ? 'İÇERİR' : 'TAM' }
+      );
+      eslesme++;
+    }
+  });
+  return { isletme, eslesme };
+}
+
+function onerileriYaz(tarih, kayitlar) {
+  db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
+  const st = db.prepare(
+    'INSERT INTO oneri (tarih, kod_no, tahmin, ekip, unsur) VALUES (:t, :k, :h, :e, :u)'
+  );
+  for (const o of kayitlar) {
+    st.run({ ':t': tarih, ':k': o.kod_no || '', ':h': o.tahmin || '', ':e': o.ekip || '', ':u': o.unsur || '' });
+  }
+  st.finalize();
+}
+
+function oneriler(tarih) {
+  return tarih
+    ? db.all('SELECT * FROM oneri WHERE tarih = :t ORDER BY id', { ':t': tarih })
+    : db.all('SELECT * FROM oneri ORDER BY tarih DESC, id LIMIT 500');
+}
+
+function logYaz(tarih, tur, mesaj) {
+  db.run('INSERT INTO islem_log (tarih, tur, mesaj) VALUES (:t, :tur, :m)', {
+    ':t': tarih || null, ':tur': tur, ':m': mesaj,
+  });
+}
+
+function loglar(limit = 200) {
+  return db.all('SELECT * FROM islem_log ORDER BY id DESC LIMIT :n', { ':n': limit });
+}
+
+function ozet() {
+  const g = db.get('SELECT COUNT(DISTINCT tarih) AS gun, COUNT(*) AS kayit FROM kayit');
+  const b = db.get(
+    `SELECT COUNT(*) AS bekleyen FROM kayit
+     WHERE ariza_var_bekliyor + donus_saglandi_bekliyor
+         + tutanak_gerekli_bekliyor + tutanak_eklendi_bekliyor > 0`
+  );
+  const son = db.get('SELECT MAX(tarih) AS tarih FROM kayit');
+  return { ...g, ...b, sonGun: son ? son.tarih : null, isletme: sayi('isletme'), yol: dbYolu };
+}
+
+function islem(fn) {
+  db.run('BEGIN');
+  try {
+    const r = fn();
+    db.run('COMMIT');
+    return r;
+  } catch (e) {
+    db.run('ROLLBACK');
+    throw e;
+  }
+}
+
+function yol() {
+  return dbYolu;
+}
+
+module.exports = {
+  ac, kur, yol, get raw() { return db; }, islem,
+  isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
+  isletmeEkle, isletmeSil,
+  gunler, aylar, gunVerisi, ayVerisi,
+  kayitYaz, hucreGuncelle, gunKategoriAc, gunSil, kategoriSifirla,
+  eslesmeler, eslesmeEkle, eslesmeSil, eslesmeleriDisaAktar, eslesmeleriIceAktar,
+  onerileriYaz, oneriler, logYaz, loglar, ozet,
+};

@@ -1,0 +1,1136 @@
+// Hamza ALMALI
+
+'use strict';
+
+const api = window.api;
+
+const IKON = {
+  genel: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 9h8V3h-8z"/>',
+  gunluk: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/>',
+  ay: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  aktar: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  gecmis: '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/>',
+  eslesme: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  oneri: '<path d="M12 2a7 7 0 0 0-4 12.7V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.3A7 7 0 0 0 12 2z"/><path d="M9 22h6"/>',
+  excel: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l6 6M15 13l-6 6"/>',
+  yenile: '<path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/>',
+  sil: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+  ekle: '<path d="M12 5v14M5 12h14"/>',
+  kapat: '<path d="M18 6 6 18M6 6l12 12"/>',
+  ok: '<path d="M20 6 9 17l-5-5"/>',
+  uyari: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  sol: '<path d="m15 18-6-6 6-6"/>',
+  sag: '<path d="m9 18 6-6-6-6"/>',
+};
+
+const svg = (ad, sinif = '') =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+        stroke-linecap="round" stroke-linejoin="round" class="${sinif}">${IKON[ad] || ''}</svg>`;
+
+const SAYFALAR = [
+  { id: 'genel',    ad: 'Genel Bakış',     alt: 'Özet ve son durum',                ikon: 'genel' },
+  { id: 'gunluk',   ad: 'Günlük Takip',    alt: 'Gün bazlı işaretleme formu',       ikon: 'gunluk' },
+  { id: 'ay',       ad: 'Ay Tablosu',      alt: 'Ayın tamamı, geniş tablo',                   ikon: 'ay' },
+  { id: 'aktar',    ad: 'Rapor Aktar',     alt: 'Günlük rapor dosyalarını oku',     ikon: 'aktar' },
+  { id: 'gecmis',   ad: 'Geçmiş Aktarım',  alt: 'Eski geniş tabloları içe aktar', ikon: 'gecmis' },
+  { id: 'eslesme',  ad: 'Eşleştirme',      alt: 'Rapor metni → işletme kuralları',      ikon: 'eslesme' },
+  { id: 'oneri',    ad: 'Öneriler', alt: 'Elle işaretlenecek kayıtlar',    ikon: 'oneri' },
+];
+
+const AY_ADI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+  'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+const ALAN_KISA = {
+  ariza_var: 'A', donus_saglandi: 'D', tutanak_gerekli: 'TG', tutanak_eklendi: 'TE',
+};
+const ALAN_AD = {
+  ariza_var: 'Arızası var mı?', donus_saglandi: 'Dönüş sağlandı mı?',
+  tutanak_gerekli: 'Tutanak gerekli mi?', tutanak_eklendi: 'Tutanak eklendi mi?',
+};
+const ALANLAR_4 = ['ariza_var', 'donus_saglandi', 'tutanak_gerekli', 'tutanak_eklendi'];
+const ALANLAR_2 = ['tutanak_gerekli', 'tutanak_eklendi'];
+const alanlariAl = (g) => (g === 4 ? ALANLAR_4 : ALANLAR_2);
+
+const D = {
+  sayfa: 'genel',
+  daralt: false,
+  isletmeler: [],
+  kategoriler: [],
+  tarih: null,
+  ay: null,
+  gunVerisi: null,
+};
+
+const $ = (s, k = document) => k.querySelector(s);
+const el = (id) => document.getElementById(id);
+
+async function cagir(sozVerilen) {
+  const r = await sozVerilen;
+  if (!r || !r.ok) throw new Error((r && r.hata) || 'Bilinmeyen hata');
+  return r.veri;
+}
+
+function bildir(mesaj, tur = 'bilgi') {
+  const renk = {
+    bilgi: 'border-line-2 bg-panel-3 text-fg',
+    basari: 'border-brand-2/60 bg-brand-dim text-fg',
+    hata: 'border-danger/60 bg-danger/15 text-fg',
+  }[tur];
+  const d = document.createElement('div');
+  d.className = `pointer-events-auto rounded-lg border px-4 py-3 text-[12.5px] shadow-xl ${renk}`;
+  d.innerHTML = mesaj;
+  el('bildirimler').appendChild(d);
+  setTimeout(() => {
+    d.style.transition = 'opacity .3s';
+    d.style.opacity = '0';
+    setTimeout(() => d.remove(), 300);
+  }, tur === 'hata' ? 9000 : 4500);
+}
+
+const gunAdi = (iso) => {
+  const [y, a, g] = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(y, a - 1, g));
+  return ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'][d.getUTCDay()];
+};
+const tarihYaz = (iso) => {
+  if (!iso) return '—';
+  const [y, a, g] = iso.split('-');
+  return `${g}.${a}.${y}`;
+};
+const ayYaz = (ay) => {
+  const [y, a] = ay.split('-').map(Number);
+  return `${AY_ADI[a - 1]} ${y}`;
+};
+const bugun = () => new Date().toISOString().slice(0, 10);
+const kacar = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function menuCiz() {
+  el('menu').innerHTML = SAYFALAR.map((s) => `
+    <button class="nav-item w-full ${D.sayfa === s.id ? 'active' : ''}" data-sayfa="${s.id}" title="${s.ad}">
+      ${svg(s.ikon)}<span class="etiket truncate">${s.ad}</span>
+    </button>`).join('');
+}
+
+function sidebarUygula() {
+  const s = el('sidebar');
+  s.classList.toggle('w-60', !D.daralt);
+  s.classList.toggle('w-[60px]', D.daralt);
+  document.querySelectorAll('.etiket').forEach((e) => e.classList.toggle('hidden', D.daralt));
+  el('toggleIkon').style.transform = D.daralt ? 'rotate(180deg)' : '';
+  el('toggleSidebar').title = D.daralt ? 'Menüyü aç (Ctrl+B)' : 'Menüyü daralt (Ctrl+B)';
+  localStorage.setItem('daralt', D.daralt ? '1' : '0');
+}
+
+function panelAc(baslik, icerik) {
+  const p = el('yanPanel');
+  p.innerHTML = `
+    <div class="flex h-14 shrink-0 items-center justify-between border-b border-line px-4">
+      <div class="text-[14px] font-semibold">${baslik}</div>
+      <button class="btn-ghost btn btn-sm" id="panelKapat">${svg('kapat', 'size-4')}</button>
+    </div>
+    <div class="min-h-0 flex-1 overflow-auto p-4">${icerik}</div>`;
+  p.classList.remove('hidden');
+  p.classList.add('flex');
+  el('panelKatman').classList.remove('hidden');
+  el('panelKapat').onclick = panelKapat;
+}
+function panelKapat() {
+  el('yanPanel').classList.add('hidden');
+  el('yanPanel').classList.remove('flex');
+  el('panelKatman').classList.add('hidden');
+}
+
+async function git(id) {
+  D.sayfa = id;
+  menuCiz();
+  const s = SAYFALAR.find((x) => x.id === id);
+  el('sayfaBaslik').textContent = s ? s.ad : 'Ayarlar';
+  el('sayfaAlt').textContent = s ? s.alt : 'Sürüm, güncelleme ve kayıtlar';
+  el('navAraclar').innerHTML = '';
+  el('icerik').innerHTML = `<div class="p-10 text-center text-fg-3">Yükleniyor…</div>`;
+  try {
+    await ({
+      genel: sayfaGenel, gunluk: sayfaGunluk, ay: sayfaAy, aktar: sayfaAktar,
+      gecmis: sayfaGecmis, eslesme: sayfaEslesme, oneri: sayfaOneri, ayarlar: sayfaAyarlar,
+    }[id] || sayfaGenel)();
+  } catch (e) {
+    el('icerik').innerHTML = `<div class="card p-6 text-danger">${kacar(e.message)}</div>`;
+  }
+}
+
+async function sayfaGenel() {
+  const [ozet, gunler, aylar] = await Promise.all([
+    cagir(api.ozet()), cagir(api.gunler()), cagir(api.aylar()),
+  ]);
+
+  if (!ozet.gun && !ozet.isletme) {
+    el('icerik').innerHTML = `
+      <div class="min-h-0 flex-1 overflow-auto">
+        <div class="card p-8">
+          <h2 class="text-[17px] font-semibold">Başlayalım</h2>
+          <p class="mt-2 text-[12.5px] text-fg-2">
+            Uygulama hiçbir veriyle gelmez. İşletme listeniz, eşleştirme tablonuz ve tüm
+            kayıtlarınız <b>bu bilgisayarda</b> oluşur ve burada kalır.
+          </p>
+          <ol class="mt-5 space-y-4 text-[12.5px]">
+            <li class="flex gap-3">
+              <span class="flex size-6 shrink-0 items-center justify-center rounded-full
+                           border border-brand-2/50 text-[11px] text-brand">1</span>
+              <div>
+                <div class="font-medium">Geçmiş tablonuzu içe aktarın</div>
+                <div class="text-fg-3">Mevcut geniş Excel tablonuz okunur; işletme listesi
+                  dosyadan çıkarılır ve geçmiş işaretler kaydedilir.</div>
+                <button class="btn btn-brand mt-2" data-sayfa="gecmis">
+                  ${svg('gecmis', 'size-4')} Geçmiş Aktarım</button>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex size-6 shrink-0 items-center justify-center rounded-full
+                           border border-line-2 text-[11px] text-fg-3">2</span>
+              <div>
+                <div class="font-medium">Eşleştirmeyi gözden geçirin</div>
+                <div class="text-fg-3">Her işletme için adıyla birebir eşleşen bir kural kurulur.
+                  Beldeler gibi istisnaları (örn. bir beldenin bağlı ilçeye yazılması)
+                  siz eklersiniz.</div>
+                <button class="btn mt-2" data-sayfa="eslesme">${svg('eslesme', 'size-4')} Eşleştirme</button>
+              </div>
+            </li>
+            <li class="flex gap-3">
+              <span class="flex size-6 shrink-0 items-center justify-center rounded-full
+                           border border-line-2 text-[11px] text-fg-3">3</span>
+              <div>
+                <div class="font-medium">Her gün raporları aktarın</div>
+                <div class="text-fg-3">Günlük rapor dosyalarını seçin; işaretleme otomatik yapılır.</div>
+                <button class="btn mt-2" data-sayfa="aktar">${svg('aktar', 'size-4')} Rapor Aktar</button>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const kart = (baslik, deger, alt, renk = 'text-fg') => `
+    <div class="card p-4">
+      <div class="text-[11.5px] uppercase tracking-wide text-fg-3">${baslik}</div>
+      <div class="mt-1.5 text-[26px] font-semibold leading-none ${renk}">${deger}</div>
+      <div class="mt-1.5 text-[11.5px] text-fg-3">${alt}</div>
+    </div>`;
+
+  el('navAraclar').innerHTML =
+    `<button class="btn" id="yenile">${svg('yenile', 'size-4')} Yenile</button>`;
+  el('yenile').onclick = () => git('genel');
+
+  el('icerik').innerHTML = `
+    <div class="grid shrink-0 grid-cols-4 gap-4">
+      ${kart('Kayıtlı gün', ozet.gun, `${aylar.length} ay`)}
+      ${kart('Toplam kayıt', ozet.kayit.toLocaleString('tr-TR'), `${ozet.isletme} işletme`)}
+      ${kart('Bekleyen', (ozet.bekleyen || 0).toLocaleString('tr-TR'), 'dönüş / tutanak', 'text-warn')}
+      ${kart('Son gün', tarihYaz(ozet.sonGun), ozet.sonGun ? gunAdi(ozet.sonGun) : '—', 'text-brand')}
+    </div>
+
+    <div class="mt-4 grid min-h-0 flex-1 grid-cols-3 gap-4">
+      <div class="card col-span-2 flex min-h-0 flex-col overflow-hidden">
+        <div class="card-head"><div class="font-medium">Son günler</div>
+          <div class="text-[11.5px] text-fg-3">${gunler.length} gün</div></div>
+        <div class="min-h-0 flex-1 overflow-auto">
+          <table class="tbl">
+            <thead><tr><th>Tarih</th><th>Gün</th><th class="text-right">İşaret</th>
+              <th class="text-right">Bekleyen</th><th></th></tr></thead>
+            <tbody>${gunler.slice(0, 40).map((g) => `
+              <tr class="cursor-pointer" data-gun="${g.tarih}">
+                <td class="font-medium">${tarihYaz(g.tarih)}</td>
+                <td class="text-fg-3">${gunAdi(g.tarih)}</td>
+                <td class="text-right">${g.isaret || 0}</td>
+                <td class="text-right ${g.bekleyen ? 'text-warn' : 'text-fg-3'}">${g.bekleyen || 0}</td>
+                <td class="text-right text-fg-3">›</td>
+              </tr>`).join('') || '<tr><td colspan="5" class="py-8 text-center text-fg-3">Kayıt yok</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card flex min-h-0 flex-col overflow-hidden">
+        <div class="card-head"><div class="font-medium">Aylar</div></div>
+        <div class="min-h-0 flex-1 overflow-auto p-2">
+          ${aylar.map((a) => `
+            <button class="nav-item w-full justify-between" data-ay="${a.ay}">
+              <span>${ayYaz(a.ay)}</span>
+              <span class="chip border-line-2 text-fg-3">${a.gun} gün</span>
+            </button>`).join('') || '<div class="p-6 text-center text-fg-3">—</div>'}
+        </div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll('[data-gun]').forEach((t) => {
+    t.onclick = () => { D.tarih = t.dataset.gun; git('gunluk'); };
+  });
+  document.querySelectorAll('[data-ay]').forEach((t) => {
+    t.onclick = () => { D.ay = t.dataset.ay; git('ay'); };
+  });
+}
+
+async function sayfaGunluk() {
+  const gunler = await cagir(api.gunler());
+  if (!D.tarih) D.tarih = gunler.length ? gunler[0].tarih : bugun();
+
+  el('navAraclar').innerHTML = `
+    <button class="btn" id="oncekiGun" title="Önceki gün">${svg('sol', 'size-4')}</button>
+    <input type="date" id="tarihSec" value="${D.tarih}" class="input" />
+    <button class="btn" id="sonrakiGun" title="Sonraki gün">${svg('sag', 'size-4')}</button>
+    <button class="btn ml-1" id="oncekiKayit" title="Kayıt olan önceki güne atla">« Kayıt</button>
+    <button class="btn" id="sonrakiKayit" title="Kayıt olan sonraki güne atla">Kayıt »</button>
+    <button class="btn btn-brand ml-1" id="raporAktar">${svg('aktar', 'size-4')} Rapor Aktar</button>`;
+
+  el('tarihSec').onchange = (e) => {
+    if (e.target.value) { D.tarih = e.target.value; sayfaGunluk(); }
+  };
+  el('raporAktar').onclick = () => git('aktar');
+
+  const kaydir = (gun) => {
+    const [y, a, g] = D.tarih.split('-').map(Number);
+    const d = new Date(Date.UTC(y, a - 1, g + gun));
+    D.tarih = d.toISOString().slice(0, 10);
+    sayfaGunluk();
+  };
+  el('oncekiGun').onclick = () => kaydir(-1);
+  el('sonrakiGun').onclick = () => kaydir(1);
+
+  const sirali = gunler.map((g) => g.tarih).sort();
+  const onceki = sirali.filter((t) => t < D.tarih).pop();
+  const sonraki = sirali.find((t) => t > D.tarih);
+  el('oncekiKayit').disabled = !onceki;
+  el('sonrakiKayit').disabled = !sonraki;
+  el('oncekiKayit').onclick = () => { if (onceki) { D.tarih = onceki; sayfaGunluk(); } };
+  el('sonrakiKayit').onclick = () => { if (sonraki) { D.tarih = sonraki; sayfaGunluk(); } };
+
+  await gunIzgarasiCiz();
+}
+
+async function gunIzgarasiCiz() {
+  const [isletmeler, kategoriler, veri] = await Promise.all([
+    cagir(api.isletmeler()), cagir(api.kategoriler()), cagir(api.gunVerisi(D.tarih)),
+  ]);
+  D.isletmeler = isletmeler;
+  D.kategoriler = kategoriler;
+  D.gunVerisi = veri;
+
+  const acik = veri.acikKategoriler.length
+    ? kategoriler.filter((k) => veri.acikKategoriler.includes(k.kod))
+    : kategoriler;
+
+  const harita = new Map();
+  for (const s of veri.satirlar) {
+    if (!harita.has(s.isletme_id)) harita.set(s.isletme_id, new Map());
+    harita.get(s.isletme_id).set(s.kategori_kod, s);
+  }
+  D.harita = harita;
+
+  if (!veri.satirlar.length && !veri.acikKategoriler.length) {
+    el('icerik').innerHTML = `
+      <div class="card flex flex-col items-center gap-3 p-12 text-center">
+        <div class="text-fg-2">${tarihYaz(D.tarih)} için kayıt yok.</div>
+        <div class="text-[12px] text-fg-3">Günlük rapor dosyalarını aktarabilir ya da hücrelere elle tıklayabilirsiniz.</div>
+        <div class="mt-2 flex gap-2">
+          <button class="btn btn-brand" id="bosAktar">${svg('aktar', 'size-4')} Rapor Aktar</button>
+          <button class="btn" id="bosAc">Boş gün aç</button>
+        </div>
+      </div>`;
+    el('bosAktar').onclick = () => git('aktar');
+    el('bosAc').onclick = async () => {
+      await cagir(api.gunKategoriAc(D.tarih, kategoriler.map((k) => k.id)));
+      gunIzgarasiCiz();
+    };
+    return;
+  }
+
+  const basSatir1 = acik.map((k) => `
+    <th colspan="${k.genislik}"
+        class="border-b border-r border-line bg-panel-2 px-2 py-1.5 text-center text-[11px]
+               font-semibold uppercase tracking-wide ${k.otomatik ? 'text-fg-2' : 'text-fg-3'}"
+        title="${k.otomatik ? 'Rapordan otomatik işaretlenir' : 'Elle doldurulur'}">
+      ${kacar(k.ad)}${k.otomatik ? '' : ' <span class="text-[9px] font-normal">(elle)</span>'}
+    </th>`).join('');
+
+  const basSatir2 = acik.map((k) => alanlariAl(k.genislik).map((a) => `
+    <th class="border-b border-r border-line bg-panel-2 px-0 py-1 text-center text-[10px] font-medium text-fg-3"
+        title="${ALAN_AD[a]}">${ALAN_KISA[a]}</th>`).join('')).join('');
+
+  const satirlar = isletmeler.map((isl) => {
+    const kayitlar = harita.get(isl.id) || new Map();
+    const hucreler = acik.map((k) => {
+      const kayit = kayitlar.get(k.kod);
+      return alanlariAl(k.genislik).map((a) => {
+        const isaretli = kayit && kayit[a] ? 'isaretli' : '';
+        const bekliyor = kayit && kayit[a + '_bekliyor'] ? 'bekliyor' : '';
+        return `<td class="grid-cell ${isaretli} ${bekliyor}"
+                    data-i="${isl.id}" data-k="${k.id}" data-a="${a}"
+                    title="${kacar(isl.ad)} · ${kacar(k.ad)} · ${ALAN_AD[a]}">${isaretli ? 'X' : ''}</td>`;
+      }).join('');
+    }).join('');
+    return `<tr>
+      <td class="sticky-col cursor-pointer px-3 py-0 text-[12px] font-medium hover:text-brand"
+          data-form="${isl.id}" style="height:26px" title="Form görünümünde aç">${kacar(isl.ad)}</td>
+      ${hucreler}</tr>`;
+  }).join('');
+
+  el('icerik').innerHTML = `
+    <div class="mb-3 flex shrink-0 items-center justify-between">
+      <div class="flex items-center gap-2 text-[12.5px]">
+        <span class="chip border-brand-2/50 bg-brand-dim text-brand">${gunAdi(D.tarih)}, ${tarihYaz(D.tarih)}</span>
+        <span class="text-fg-3">Hücreye tıklayarak işaretleyin · işletme adına tıklayın → form</span>
+      </div>
+      <div class="flex items-center gap-3 text-[11px] text-fg-3">
+        <span class="flex items-center gap-1.5"><i class="inline-block size-3 rounded-sm bg-brand-dim"></i> İşaretli</span>
+        <span class="flex items-center gap-1.5"><i class="inline-block size-3 rounded-sm" style="background:rgba(240,82,82,.25)"></i> Bekliyor</span>
+        <button class="btn btn-sm" id="gunSil">${svg('sil', 'size-3.5')} Günü sil</button>
+      </div>
+    </div>
+
+    <div class="card min-h-0 flex-1 overflow-auto">
+      <table class="border-collapse">
+        <thead class="sticky top-0 z-20">
+          <tr><th rowspan="2" class="sticky-col border-b border-r border-line bg-panel-2 px-3 py-1.5
+                     text-left text-[11px] font-semibold uppercase tracking-wide text-fg-2"
+                  style="min-width:140px">İşletme</th>${basSatir1}</tr>
+          <tr>${basSatir2}</tr>
+        </thead>
+        <tbody>${satirlar}</tbody>
+      </table>
+    </div>`;
+
+  el('gunSil').onclick = async () => {
+    if (!confirm(`${tarihYaz(D.tarih)} gününe ait tüm kayıtlar silinecek. Emin misiniz?`)) return;
+    await cagir(api.gunSil(D.tarih));
+    bildir('Gün silindi.', 'basari');
+    gunIzgarasiCiz();
+  };
+
+  el('icerik').querySelectorAll('.grid-cell').forEach((h) => {
+    h.onclick = () => hucreTikla(h);
+  });
+  el('icerik').querySelectorAll('[data-form]').forEach((t) => {
+    t.onclick = () => formAc(Number(t.dataset.form));
+  });
+}
+
+async function hucreTikla(hucre) {
+  const isletme_id = Number(hucre.dataset.i);
+  const kategori_id = Number(hucre.dataset.k);
+  const alan = hucre.dataset.a;
+  const yeni = !hucre.classList.contains('isaretli');
+  try {
+    const kayit = await cagir(api.hucreGuncelle({
+      tarih: D.tarih, isletme_id, kategori_id, alan, deger: yeni ? 1 : 0,
+    }));
+    hucre.classList.toggle('isaretli', yeni);
+    hucre.textContent = yeni ? 'X' : '';
+    if (!D.harita.has(isletme_id)) D.harita.set(isletme_id, new Map());
+    const kat = D.kategoriler.find((k) => k.id === kategori_id);
+    if (kat) D.harita.get(isletme_id).set(kat.kod, { ...kayit, kategori_kod: kat.kod });
+  } catch (e) {
+    bildir(`Kaydedilemedi: ${kacar(e.message)}`, 'hata');
+  }
+}
+
+function formAc(isletmeId) {
+  const isl = D.isletmeler.find((i) => i.id === isletmeId);
+  if (!isl) return;
+  const kayitlar = D.harita.get(isletmeId) || new Map();
+  const acik = D.gunVerisi.acikKategoriler.length
+    ? D.kategoriler.filter((k) => D.gunVerisi.acikKategoriler.includes(k.kod))
+    : D.kategoriler;
+
+  const govde = acik.map((k) => {
+    const kayit = kayitlar.get(k.kod) || {};
+    const satirlar = alanlariAl(k.genislik).map((a) => `
+      <label class="flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 hover:bg-panel-2">
+        <span class="text-[12.5px] ${kayit[a] ? 'text-fg' : 'text-fg-2'}">${ALAN_AD[a]}</span>
+        <span class="flex items-center gap-2">
+          ${kayit[a + '_bekliyor'] ? '<span class="chip border-danger/50 bg-danger/15 text-danger">bekliyor</span>' : ''}
+          <input type="checkbox" ${kayit[a] ? 'checked' : ''}
+                 class="size-4 accent-[#3ecf8e]"
+                 data-fi="${isletmeId}" data-fk="${k.id}" data-fa="${a}" />
+        </span>
+      </label>`).join('');
+    return `
+      <div class="card mb-3">
+        <div class="card-head py-2">
+          <div class="text-[12.5px] font-medium">${kacar(k.ad)}</div>
+          ${k.otomatik
+            ? '<span class="chip border-brand-2/40 text-brand">otomatik</span>'
+            : '<span class="chip border-line-2 text-fg-3">elle</span>'}
+        </div>
+        <div class="p-2">${satirlar}</div>
+      </div>`;
+  }).join('');
+
+  panelAc(
+    `${kacar(isl.ad)} <span class="ml-2 text-[12px] font-normal text-fg-3">${tarihYaz(D.tarih)}</span>`,
+    govde || '<div class="p-6 text-center text-fg-3">Bu gün için açık kategori yok.</div>'
+  );
+
+  el('yanPanel').querySelectorAll('input[type=checkbox]').forEach((c) => {
+    c.onchange = async () => {
+      try {
+        await cagir(api.hucreGuncelle({
+          tarih: D.tarih,
+          isletme_id: Number(c.dataset.fi),
+          kategori_id: Number(c.dataset.fk),
+          alan: c.dataset.fa,
+          deger: c.checked ? 1 : 0,
+        }));
+        const kat = D.kategoriler.find((k) => k.id === Number(c.dataset.fk));
+        const h = el('icerik').querySelector(
+          `.grid-cell[data-i="${c.dataset.fi}"][data-k="${c.dataset.fk}"][data-a="${c.dataset.fa}"]`
+        );
+        if (h) { h.classList.toggle('isaretli', c.checked); h.textContent = c.checked ? 'X' : ''; }
+        if (kat) {
+          if (!D.harita.has(Number(c.dataset.fi))) D.harita.set(Number(c.dataset.fi), new Map());
+          const mevcut = D.harita.get(Number(c.dataset.fi)).get(kat.kod) || {};
+          D.harita.get(Number(c.dataset.fi)).set(kat.kod, { ...mevcut, [c.dataset.fa]: c.checked ? 1 : 0 });
+        }
+      } catch (e) {
+        c.checked = !c.checked;
+        bildir(`Kaydedilemedi: ${kacar(e.message)}`, 'hata');
+      }
+    };
+  });
+}
+
+async function sayfaAy() {
+  const aylar = await cagir(api.aylar());
+  if (!aylar.length) {
+    el('icerik').innerHTML = '<div class="card p-12 text-center text-fg-3">Henüz kayıt yok.</div>';
+    return;
+  }
+  if (!D.ay || !aylar.find((a) => a.ay === D.ay)) D.ay = aylar[0].ay;
+
+  el('navAraclar').innerHTML = `
+    <select id="aySec" class="input">${aylar.map((a) =>
+      `<option value="${a.ay}" ${a.ay === D.ay ? 'selected' : ''}>${ayYaz(a.ay)} (${a.gun} gün)</option>`
+    ).join('')}</select>
+    <button class="btn btn-brand" id="excelAktar">${svg('excel', 'size-4')} Excel'e Aktar</button>`;
+
+  el('aySec').onchange = (e) => { D.ay = e.target.value; sayfaAy(); };
+  el('excelAktar').onclick = async () => {
+    try {
+      const yol = await cagir(api.excelDisaAktar(D.ay));
+      if (!yol) return;
+      bildir(`Kaydedildi:<br><span class="text-fg-3">${kacar(yol)}</span>`, 'basari');
+      api.klasorAc(yol);
+    } catch (e) { bildir(`Aktarılamadı: ${kacar(e.message)}`, 'hata'); }
+  };
+
+  const [isletmeler, kategoriler, veri] = await Promise.all([
+    cagir(api.isletmeler()), cagir(api.kategoriler()), cagir(api.ayVerisi(D.ay)),
+  ]);
+  const katKod = new Map(kategoriler.map((k) => [k.kod, k]));
+
+  const gunler = new Map();
+  for (const s of veri) {
+    if (!gunler.has(s.tarih)) gunler.set(s.tarih, new Map());
+    const g = gunler.get(s.tarih);
+    if (!g.has(s.kategori_kod)) g.set(s.kategori_kod, new Map());
+    g.get(s.kategori_kod).set(s.isletme, s);
+  }
+  const tarihler = [...gunler.keys()].sort();
+
+  const gunKategorileri = (t) =>
+    [...gunler.get(t).keys()].map((k) => katKod.get(k)).filter(Boolean)
+      .sort((a, b) => a.sira - b.sira);
+
+  const bas1 = tarihler.map((t) => {
+    const gen = gunKategorileri(t).reduce((s, k) => s + k.genislik, 0);
+    return `<th colspan="${gen}" class="border-b border-r-2 border-r-line-2 border-line bg-panel-2
+                px-2 py-1.5 text-center text-[11px] font-semibold">${tarihYaz(t)}</th>`;
+  }).join('');
+
+  const bas2 = tarihler.map((t) => gunKategorileri(t).map((k) =>
+    `<th colspan="${k.genislik}" class="border-b border-r border-line bg-panel-2 px-1 py-1
+         text-center text-[9.5px] font-medium text-fg-3" title="${kacar(k.ad)}">
+       ${kacar(k.ad.length > 12 ? k.ad.slice(0, 11) + '…' : k.ad)}</th>`).join('')).join('');
+
+  const govde = isletmeler.map((isl) => {
+    const hucreler = tarihler.map((t) => gunKategorileri(t).map((k) => {
+      const kayit = (gunler.get(t).get(k.kod) || new Map()).get(isl.ad);
+      return alanlariAl(k.genislik).map((a) => {
+        const i = kayit && kayit[a];
+        const b = kayit && kayit[a + '_bekliyor'];
+        return `<td class="grid-cell kilit ${i ? 'isaretli' : ''} ${b ? 'bekliyor' : ''}"
+                    style="width:22px;min-width:22px">${i ? 'X' : ''}</td>`;
+      }).join('');
+    }).join('')).join('');
+    return `<tr><td class="sticky-col px-3 text-[12px] font-medium" style="height:26px">${kacar(isl.ad)}</td>${hucreler}</tr>`;
+  }).join('');
+
+  el('icerik').innerHTML = `
+    <div class="mb-3 shrink-0 text-[12px] text-fg-3">
+      ${ayYaz(D.ay)} · ${tarihler.length} gün · salt okunur görünüm
+      (düzenlemek için <button class="text-brand hover:underline" id="gunlugeGit">Günlük Takip</button>)
+    </div>
+    <div class="card min-h-0 flex-1 overflow-auto">
+      <table class="border-collapse">
+        <thead class="sticky top-0 z-20">
+          <tr><th rowspan="2" class="sticky-col border-b border-r border-line bg-panel-2 px-3 py-1.5
+                  text-left text-[11px] font-semibold" style="min-width:130px">İşletme</th>${bas1}</tr>
+          <tr>${bas2}</tr>
+        </thead>
+        <tbody>${govde}</tbody>
+      </table>
+    </div>`;
+  el('gunlugeGit').onclick = () => git('gunluk');
+}
+
+async function sayfaAktar() {
+  const ozet = await cagir(api.ozet());
+  const bosMu = !ozet.isletme;
+
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 overflow-auto">
+      <div class="card">
+        <div class="card-head"><div class="font-medium">Günlük rapor dosyaları</div></div>
+        <div class="space-y-4 p-5">
+          <p class="text-[12.5px] text-fg-2">
+            O güne ait rapor dosyalarını seçin (hepsini birden seçebilirsiniz). Dosya adları önemli
+            değil — sayfa adlarından tanınır. Tarih dosya adındaki <b>GG.AA.YYYY</b>'den okunur.
+          </p>
+
+          <div class="rounded-md border border-line bg-bg-200 p-3 text-[11.5px] text-fg-3">
+            <div class="mb-1.5 font-medium text-fg-2">Tanınan raporlar</div>
+            <div class="grid grid-cols-2 gap-x-6 gap-y-1">
+              <span>Arıza Detay → <b class="text-fg-2">ARIZA DETAY</b></span>
+              <span>AYS_IhbarTakipRaporu → <b class="text-fg-2">DURUM KODU</b></span>
+              <span>BİNA TİPİ OSOS → <b class="text-fg-2">BİNA TİPİ OSOS</b></span>
+              <span>OSOS BAĞLANTI İHBAR İNC. → <b class="text-fg-2">OSOS BAĞLANTI</b></span>
+              <span>TABLO-1 … → <b class="text-fg-2">BİLGİ BELGE</b></span>
+              <span>İL-İLÇE → <b class="text-fg-2">öneri listesi (elle)</b></span>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+              <input type="checkbox" id="uzerineYaz" checked class="size-4 accent-[#3ecf8e]" />
+              Aynı gün varsa okunan kategorileri sıfırla
+            </label>
+            <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+              <input type="checkbox" id="yeniIsletme" ${bosMu ? 'checked' : ''} class="size-4 accent-[#3ecf8e]" />
+              Tanınmayan ilçeleri işletme olarak ekle
+              <span class="text-fg-3">${bosMu
+                ? '— liste boş, ilk aktarımda işletmeler rapordan öğrenilsin'
+                : '— kapalıysa eşleşmeyenler ekranda listelenir'}</span>
+            </label>
+          </div>
+          <button class="btn btn-brand" id="dosyaSec">${svg('aktar', 'size-4')} Dosyaları Seç</button>
+          <div class="text-[11.5px] text-fg-3">
+            Tarih dosya adından okunamazsa aşağıdan seçebilirsiniz:
+            <input type="date" id="elleTarih" class="input ml-2" />
+          </div>
+        </div>
+      </div>
+      <div id="aktarSonuc" class="mt-4"></div>
+    </div>`;
+
+  el('dosyaSec').onclick = async () => {
+    const dosyalar = await cagir(api.dosyaSec('Günlük rapor dosyalarını seçin'));
+    if (!dosyalar.length) return;
+    const btn = el('dosyaSec');
+    btn.disabled = true;
+    btn.innerHTML = 'Okunuyor…';
+    el('aktarSonuc').innerHTML =
+      `<div class="card p-4 text-fg-3">${dosyalar.length} dosya işleniyor…</div>`;
+    try {
+      const r = await cagir(api.gunlukAktar(dosyalar, {
+        tarih: el('elleTarih').value || undefined,
+        uzerineYaz: el('uzerineYaz').checked,
+        yeniIsletmeEkle: el('yeniIsletme').checked,
+      }));
+      aktarSonucuCiz(r);
+      bildir(r.isaretToplam
+        ? `<b>Aktarım tamamlandı.</b><br>${tarihYaz(r.tarih)} — ${r.isaretToplam} işaretleme yazıldı.`
+        : `<b>Aktarım bitti ama hiçbir şey işaretlenmedi.</b><br>Ayrıntı ekranda.`,
+      r.isaretToplam ? 'basari' : 'hata');
+    } catch (e) {
+      el('aktarSonuc').innerHTML =
+        `<div class="card border-danger/40 p-4 text-danger">${kacar(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `${svg('aktar', 'size-4')} Dosyaları Seç`;
+    }
+  };
+}
+
+function aktarSonucuCiz(r) {
+  const basarili = r.isaretToplam > 0;
+  el('aktarSonuc').innerHTML = `
+    <div class="card ${basarili ? 'border-brand-2/50' : 'border-danger/50'}">
+      <div class="card-head ${basarili ? 'bg-brand-dim/40' : 'bg-danger/10'}">
+        <div class="flex items-center gap-2">
+          <span class="${basarili ? 'text-brand' : 'text-danger'}">
+            ${svg(basarili ? 'ok' : 'uyari', 'size-5')}</span>
+          <div>
+            <div class="font-medium">${basarili
+              ? 'Aktarım tamamlandı'
+              : 'Aktarım bitti — hiçbir şey işaretlenmedi'}</div>
+            <div class="text-[11.5px] text-fg-3">
+              ${tarihYaz(r.tarih)} · ${r.isaretToplam} işaretleme ·
+              ${r.kategoriler.filter((k) => k.otomatik).length} kategori</div>
+          </div>
+        </div>
+        <button class="btn btn-sm ${basarili ? 'btn-brand' : ''}" id="gunuAc">Günü aç</button>
+      </div>
+      <div class="space-y-3 p-4">
+        ${!basarili ? `
+          <div class="rounded-md border border-danger/40 bg-danger/10 p-3 text-[12.5px]">
+            Raporlar okundu ama ilçelerin hiçbiri bir işletmeyle eşleşmedi.
+            ${r.eslesmez.length
+              ? 'Aşağıdaki değerler için karşılık seçin ya da aktarımı '
+                + '<b>“Tanınmayan ilçeleri işletme olarak ekle”</b> seçeneğiyle tekrarlayın.'
+              : 'Rapor sayfalarında il/ilçe sütunu bulunamamış olabilir.'}
+          </div>` : ''}
+        ${r.eklenenIsletmeler.length ? `
+          <div class="rounded-md border border-brand-2/40 bg-brand-dim/40 p-3 text-[12px]">
+            Rapordan <b>${r.eklenenIsletmeler.length}</b> yeni işletme öğrenildi:
+            <span class="text-fg-3">${r.eklenenIsletmeler.map(kacar).join(', ')}</span>
+          </div>` : ''}
+        <div class="space-y-1 font-mono text-[11.5px] text-fg-2">
+          ${r.satirlar.map((s) => `<div>${kacar(s)}</div>`).join('')}
+        </div>
+        ${r.oneriAdet ? `
+          <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
+            ${svg('uyari', 'inline size-3.5 -mt-0.5')} İL-İLÇE raporunda <b>${r.oneriAdet}</b> kayıt var —
+            il/ilçe bilgisi olmadığı için otomatik işaretlenmedi.
+            <button class="ml-1 text-brand hover:underline" id="oneriGit">Önerilere git</button>
+          </div>` : ''}
+        ${r.eslesmez.length ? `
+          <details class="rounded-md border border-warn/40 bg-bg-200 p-3 text-[11.5px]" open>
+            <summary class="cursor-pointer text-warn">
+              ${r.eslesmez.length} değer hiçbir işletmeyle eşleşmedi — bu kayıtlar işaretlenmedi
+            </summary>
+            <div class="mt-2 text-fg-3">
+              Karşılığını seçip <b>Kural ekle</b> deyin; bir daha sormayacak. Kurallar bu
+              bilgisayarda saklanır.
+            </div>
+            <table class="mt-2 w-full text-[11.5px]">
+              <tbody>
+                ${r.eslesmez.map((e, ix) => `
+                  <tr class="border-t border-line">
+                    <td class="py-1.5 pr-2 font-medium">${kacar(e.deger)}
+                      <span class="text-fg-3">×${e.adet}</span></td>
+                    <td class="py-1.5 pr-2 text-fg-3">${e.oneri
+                      ? `<span class="chip border-brand-2/40 text-brand">öneri: ${kacar(e.oneri.ad)}</span>`
+                      : kacar(e.sayfa)}</td>
+                    <td class="py-1.5 pr-2">
+                      <select class="input py-1" data-esec="${ix}">
+                        <option value="">— işletme seçin —</option>
+                      </select>
+                    </td>
+                    <td class="py-1.5 text-right">
+                      <button class="btn btn-sm" data-eekle="${ix}"
+                              data-deger="${kacar(e.deger)}">Kural ekle</button>
+                    </td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </details>` : ''}
+        ${r.taninmayan.length ? `
+          <div class="text-[11.5px] text-fg-3">Tanınmayan dosyalar: ${r.taninmayan.map(kacar).join(', ')}</div>` : ''}
+        ${r.uyarilar.length ? r.uyarilar.map((u) =>
+          `<div class="text-[11.5px] text-warn">${kacar(u)}</div>`).join('') : ''}
+      </div>
+    </div>`;
+  el('gunuAc').onclick = () => { D.tarih = r.tarih; git('gunluk'); };
+  const o = el('oneriGit');
+  if (o) o.onclick = () => { D.tarih = r.tarih; git('oneri'); };
+
+  if (r.eslesmez.length) eslesmezleriBagla(r);
+}
+
+async function eslesmezleriBagla(r) {
+  const isletmeler = await cagir(api.isletmeler());
+  const secenekler = isletmeler.map((i) => `<option value="${i.id}">${kacar(i.ad)}</option>`).join('');
+
+  document.querySelectorAll('[data-esec]').forEach((s) => {
+    s.insertAdjacentHTML('beforeend', secenekler);
+    const e = r.eslesmez[Number(s.dataset.esec)];
+    if (e.oneri) s.value = String(e.oneri.isletme_id);
+  });
+
+  document.querySelectorAll('[data-eekle]').forEach((b) => {
+    b.onclick = async () => {
+      const ix = b.dataset.eekle;
+      const sec = document.querySelector(`[data-esec="${ix}"]`);
+      if (!sec.value) return bildir('Önce bir işletme seçin.', 'hata');
+      try {
+        await cagir(api.eslesmeEkle({
+          kaynak_deger: b.dataset.deger, isletme_id: Number(sec.value), tip: 'TAM',
+        }));
+        b.textContent = 'Eklendi ✓';
+        b.disabled = true;
+        sec.disabled = true;
+        bildir('Kural eklendi. Raporu yeniden aktarınca uygulanacak.', 'basari');
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
+}
+
+async function sayfaGecmis() {
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 overflow-auto">
+      <div class="card">
+        <div class="card-head"><div class="font-medium">Geçmişe yönelik içe aktarma</div></div>
+        <div class="space-y-4 p-5">
+          <p class="text-[12.5px] text-fg-2">
+            Eski <b>geniş</b> Excel tablolarınızı (gün blokları yan yana olan geniş tablo) seçin.
+            Tüm ay sayfaları okunur; her gün, işletme ve kategori için işaretler ve
+            <span class="text-danger">kırmızı (bekliyor)</span> hücreler veritabanına aktarılır.
+          </p>
+          <div class="flex items-center gap-3">
+            <button class="btn btn-brand" id="gecmisSec">${svg('gecmis', 'size-4')} Tablo Dosyası Seç</button>
+            <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+              <input type="checkbox" id="uzerineYaz2" checked class="size-4 accent-[#3ecf8e]" />
+              Aynı günler varsa üzerine yaz
+            </label>
+          </div>
+          <div class="rounded-md border border-line bg-bg-200 p-3 text-[11.5px] text-fg-3">
+            Aktarım sadece <b>dolu</b> hücreleri kaydeder. Tanınmayan kategori adları atlanır ve
+            aşağıda listelenir.
+          </div>
+        </div>
+      </div>
+      <div id="gecmisSonuc" class="mt-4"></div>
+    </div>`;
+
+  el('gecmisSec').onclick = async () => {
+    const dosyalar = await cagir(api.dosyaSec('Geçmiş tablo dosyalarını seçin'));
+    if (!dosyalar.length) return;
+    const btn = el('gecmisSec');
+    btn.disabled = true;
+    btn.innerHTML = 'Okunuyor… (büyük dosyalarda biraz sürebilir)';
+    el('gecmisSonuc').innerHTML = `<div class="card p-4 text-fg-3">İşleniyor…</div>`;
+    try {
+      const r = await cagir(api.gecmisAktar(dosyalar, { uzerineYaz: el('uzerineYaz2').checked }));
+      el('gecmisSonuc').innerHTML = `
+        <div class="card">
+          <div class="card-head"><div class="font-medium">Aktarım tamam</div>
+            <button class="btn btn-sm" id="genelGit">Genel bakışa git</button></div>
+          <div class="space-y-2 p-4 text-[12.5px]">
+            <div>${r.dosyalar.map((d) => `<div>${kacar(d.dosya)} — <b>${d.gun}</b> gün</div>`).join('')}</div>
+            <div class="text-fg-2">Toplam <b class="text-brand">${r.toplamKayit}</b> kayıt ·
+              <b>${r.gunler.length}</b> gün
+              ${r.gunler.length ? `(${tarihYaz(r.gunler[0])} – ${tarihYaz(r.gunler[r.gunler.length - 1])})` : ''}</div>
+            ${r.yeniIsletmeler.length ? `<div class="text-warn">Yeni işletme eklendi: ${r.yeniIsletmeler.map(kacar).join(', ')}</div>` : ''}
+            ${r.uyarilar.length ? `<div class="space-y-0.5 text-[11.5px] text-warn">${r.uyarilar.map((u) => `<div>${kacar(u)}</div>`).join('')}</div>` : ''}
+          </div>
+        </div>`;
+      el('genelGit').onclick = () => git('genel');
+      bildir(`${r.toplamKayit} kayıt aktarıldı.`, 'basari');
+    } catch (e) {
+      el('gecmisSonuc').innerHTML =
+        `<div class="card border-danger/40 p-4 text-danger">${kacar(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = `${svg('gecmis', 'size-4')} Tablo Dosyası Seç`;
+    }
+  };
+}
+
+async function sayfaEslesme() {
+  const [eslesmeler, isletmeler] = await Promise.all([
+    cagir(api.eslesmeler()), cagir(api.isletmeler()),
+  ]);
+
+  el('navAraclar').innerHTML =
+    `<input id="ara" class="input w-56" placeholder="Ara…" />
+     <button class="btn" id="yedekle" title="Tabloyu bilgisayarınıza kaydedin">Yedekle</button>
+     <button class="btn" id="geriYukle" title="Yedek dosyasından geri yükleyin">Geri yükle</button>
+     <button class="btn btn-brand" id="yeniEslesme">${svg('ekle', 'size-4')} Yeni</button>`;
+
+  const ciz = (liste) => `
+    <table class="tbl">
+      <thead><tr><th>Kaynak değer</th><th>İşletme</th><th>Tip</th><th class="w-10"></th></tr></thead>
+      <tbody>${liste.map((e) => `
+        <tr>
+          <td class="font-medium">${kacar(e.kaynak_deger)}</td>
+          <td class="text-fg-2">${kacar(e.isletme)}</td>
+          <td><span class="chip ${e.tip === 'İÇERİR'
+            ? 'border-warn/50 text-warn' : 'border-line-2 text-fg-3'}">${e.tip}</span></td>
+          <td><button class="btn-ghost btn btn-sm" data-sil="${e.id}">${svg('sil', 'size-3.5')}</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+
+  el('icerik').innerHTML = `
+    <div class="mb-3 shrink-0 text-[12px] text-fg-3">
+      Raporlardaki <b>ilçe / il / müdürlük</b> metinlerinin hangi işletmeye yazılacağını belirler.
+      <b class="text-fg-2">TAM</b> = birebir eşleşir · <b class="text-warn">İÇERİR</b> = mahalle/köy/ekip metninin içinde aranır.
+    </div>
+    <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="min-h-0 flex-1 overflow-auto" id="eslesmeTablo">${ciz(eslesmeler)}</div>
+    </div>`;
+
+  const baglaSil = () => {
+    document.querySelectorAll('[data-sil]').forEach((b) => {
+      b.onclick = async () => {
+        const yeni = await cagir(api.eslesmeSil(Number(b.dataset.sil)));
+        el('eslesmeTablo').innerHTML = ciz(yeni);
+        baglaSil();
+        bildir('Silindi.', 'basari');
+      };
+    });
+  };
+  baglaSil();
+
+  el('ara').oninput = (e) => {
+    const q = e.target.value.trim().toLocaleLowerCase('tr');
+    el('eslesmeTablo').innerHTML = ciz(eslesmeler.filter((x) =>
+      x.kaynak_deger.toLocaleLowerCase('tr').includes(q) ||
+      x.isletme.toLocaleLowerCase('tr').includes(q)));
+    baglaSil();
+  };
+
+  el('yedekle').onclick = async () => {
+    try {
+      const yol = await cagir(api.eslesmeYedekle());
+      if (yol) { bildir(`Yedeklendi:<br><span class="text-fg-3">${kacar(yol)}</span>`, 'basari'); api.klasorAc(yol); }
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+  el('geriYukle').onclick = async () => {
+    try {
+      const r = await cagir(api.eslesmeGeriYukle());
+      if (!r) return;
+      bildir(`${r.eslesme} eşleştirme, ${r.isletme} yeni işletme yüklendi.`, 'basari');
+      sayfaEslesme();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('yeniEslesme').onclick = () => {
+    panelAc('Yeni eşleştirme', `
+      <div class="space-y-3">
+        <div><label class="mb-1 block text-[12px] text-fg-2">Kaynak değer</label>
+          <input id="yKaynak" class="input w-full" placeholder="Raporda geçen ilçe / il / müdürlük" /></div>
+        <div><label class="mb-1 block text-[12px] text-fg-2">İşletme</label>
+          <select id="yIsletme" class="input w-full">
+            ${isletmeler.map((i) => `<option value="${i.id}">${kacar(i.ad)}</option>`).join('')}
+          </select>
+          <div class="mt-1.5 flex gap-2">
+            <input id="yYeniIsletme" class="input flex-1" placeholder="Listede yoksa yeni işletme adı" />
+            <button class="btn" id="yIsletmeEkle">Ekle</button>
+          </div></div>
+        <div><label class="mb-1 block text-[12px] text-fg-2">Tip</label>
+          <select id="yTip" class="input w-full">
+            <option value="TAM">TAM — birebir eşleşir</option>
+            <option value="İÇERİR">İÇERİR — metnin içinde aranır</option>
+          </select></div>
+        <button class="btn btn-brand w-full justify-center" id="yKaydet">Kaydet</button>
+      </div>`);
+
+    el('yIsletmeEkle').onclick = async () => {
+      const ad = el('yYeniIsletme').value.trim();
+      if (!ad) return;
+      try {
+        const liste = await cagir(api.isletmeEkle(ad));
+        el('yIsletme').innerHTML = liste.map((i) =>
+          `<option value="${i.id}" ${i.ad === ad ? 'selected' : ''}>${kacar(i.ad)}</option>`).join('');
+        el('yYeniIsletme').value = '';
+        bildir(`"${kacar(ad)}" eklendi.`, 'basari');
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+
+    el('yKaydet').onclick = async () => {
+      const kaynak_deger = el('yKaynak').value.trim();
+      if (!kaynak_deger) return bildir('Kaynak değer boş olamaz.', 'hata');
+      try {
+        await cagir(api.eslesmeEkle({
+          kaynak_deger, isletme_id: Number(el('yIsletme').value), tip: el('yTip').value,
+        }));
+        panelKapat();
+        bildir('Eklendi.', 'basari');
+        sayfaEslesme();
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  };
+}
+
+async function sayfaOneri() {
+  const oneriler = await cagir(api.oneriler(D.tarih || undefined));
+  el('navAraclar').innerHTML = `
+    <input type="date" id="oTarih" value="${D.tarih || ''}" class="input" />
+    <button class="btn" id="oHepsi">Tümü</button>`;
+  el('oTarih').onchange = (e) => { D.tarih = e.target.value; sayfaOneri(); };
+  el('oHepsi').onclick = () => { D.tarih = null; sayfaOneri(); };
+
+  el('icerik').innerHTML = `
+    <div class="mb-3 shrink-0 text-[12px] text-fg-3">
+      İL-İLÇE raporunda il/ilçe bilgisi gelmediği için otomatik işaretlenemeyen kayıtlar.
+      Tahmin sütunu ekip / şebeke unsuru metninden çıkarılmıştır — doğrulayıp
+      <button class="text-brand hover:underline" id="gunlugeGit2">Günlük Takip</button> ekranından elle işaretleyin.
+    </div>
+    <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div class="min-h-0 flex-1 overflow-auto">
+        <table class="tbl">
+          <thead><tr><th>Tarih</th><th>Kod No</th><th>Tahmin</th><th>Ekip</th><th>Şebeke unsuru</th></tr></thead>
+          <tbody>${oneriler.map((o) => `
+            <tr>
+              <td class="whitespace-nowrap">${tarihYaz(o.tarih)}</td>
+              <td class="font-mono text-[11.5px]">${kacar(o.kod_no)}</td>
+              <td><span class="chip ${o.tahmin === '?'
+                ? 'border-danger/50 text-danger' : 'border-brand-2/50 text-brand'}">${kacar(o.tahmin)}</span></td>
+              <td class="text-fg-2">${kacar(o.ekip)}</td>
+              <td class="text-fg-3">${kacar(o.unsur)}</td>
+            </tr>`).join('') ||
+            '<tr><td colspan="5" class="py-10 text-center text-fg-3">Kayıt yok</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  el('gunlugeGit2').onclick = () => git('gunluk');
+}
+
+async function sayfaAyarlar() {
+  const [surum, ozet, loglar, isletmeler] = await Promise.all([
+    cagir(api.surum()), cagir(api.ozet()), cagir(api.loglar()), cagir(api.isletmeler()),
+  ]);
+
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 space-y-4 overflow-auto">
+      <div class="card">
+        <div class="card-head"><div class="font-medium">Uygulama</div>
+          <span class="chip border-brand-2/50 text-brand">v${surum.surum}</span></div>
+        <div class="space-y-3 p-5 text-[12.5px]">
+          <div class="flex items-center justify-between gap-4">
+            <span class="text-fg-2">${surum.tasinabilir
+              ? 'Taşınabilir sürüm — otomatik güncellenmez. Yeni sürümü indirip bu dosyanın '
+                + 'yerine koymanız yeterli, verileriniz etkilenmez.'
+              : 'Güncellemeler GitHub üzerinden otomatik indirilir.'}</span>
+            <button class="btn shrink-0" id="gncKontrol">${svg('yenile', 'size-4')} Güncelleme kontrol et</button>
+          </div>
+          <div id="gncDurum" class="text-[12px] text-fg-3"></div>
+          <div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">
+            Güncelleme yalnızca <b class="text-fg-2">program dosyalarını</b> değiştirir.
+            Kayıtlarınız aşağıdaki veri dosyasında durur; güncelleme sırasında okunmaz,
+            taşınmaz ve silinmez.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="font-medium">Verileriniz</div>
+          <span class="chip border-line-2 text-fg-3">bu bilgisayarda</span></div>
+        <div class="space-y-2 p-5 text-[12.5px]">
+          <div class="flex justify-between gap-4"><span class="shrink-0 text-fg-2">Konum</span>
+            <span class="truncate font-mono text-[11px] text-fg-3">${kacar(surum.vt)}</span></div>
+          <div class="flex justify-between"><span class="text-fg-2">Gün</span><span>${ozet.gun}</span></div>
+          <div class="flex justify-between"><span class="text-fg-2">Kayıt</span><span>${ozet.kayit}</span></div>
+          <div class="flex justify-between"><span class="text-fg-2">İşletme</span><span>${ozet.isletme}</span></div>
+          <div class="mt-3 flex gap-2">
+            <button class="btn" id="vtAc">Klasörde göster</button>
+            <button class="btn btn-brand" id="vtYedek">Yedek al</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card overflow-hidden">
+        <div class="card-head">
+          <div class="font-medium">İşletmeler</div>
+          <span class="text-[11.5px] text-fg-3">${isletmeler.length} kayıt</span>
+        </div>
+        <div class="flex gap-2 border-b border-line p-3">
+          <input id="isEkleAd" class="input flex-1" placeholder="Yeni işletme adı" />
+          <button class="btn btn-brand" id="isEkle">${svg('ekle', 'size-4')} Ekle</button>
+        </div>
+        <div class="max-h-64 overflow-auto">
+          <table class="tbl"><tbody>
+            ${isletmeler.map((i) => `<tr>
+              <td>${kacar(i.ad)}</td>
+              <td class="w-10 text-right">
+                <button class="btn-ghost btn btn-sm" data-isil="${i.id}"
+                        title="Sil — bu işletmenin tüm kayıtları da silinir">${svg('sil', 'size-3.5')}</button>
+              </td></tr>`).join('') ||
+              '<tr><td class="py-8 text-center text-fg-3">Henüz işletme yok — geçmiş tablonuzu içe aktarın.</td></tr>'}
+          </tbody></table>
+        </div>
+      </div>
+
+      <div class="card overflow-hidden">
+        <div class="card-head"><div class="font-medium">İşlem günlüğü</div></div>
+        <div class="max-h-72 overflow-auto p-3 font-mono text-[11px] text-fg-3">
+          ${loglar.map((l) => `<div class="border-b border-line/50 py-1">
+            <span class="text-fg-2">${kacar(l.zaman)}</span> · ${kacar(l.tur)}
+            ${l.tarih ? '· ' + tarihYaz(l.tarih) : ''}<br>${kacar(l.mesaj)}</div>`).join('')
+            || '<div class="p-4 text-center">Kayıt yok</div>'}
+        </div>
+      </div>
+    </div>`;
+
+  el('vtAc').onclick = () => api.klasorAc(surum.vt);
+
+  el('vtYedek').onclick = async () => {
+    try {
+      const yol = await cagir(api.vtYedekle());
+      if (yol) { bildir(`Yedek alındı:<br><span class="text-fg-3">${kacar(yol)}</span>`, 'basari'); api.klasorAc(yol); }
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('isEkle').onclick = async () => {
+    const ad = el('isEkleAd').value.trim();
+    if (!ad) return;
+    try { await cagir(api.isletmeEkle(ad)); bildir(`"${kacar(ad)}" eklendi.`, 'basari'); sayfaAyarlar(); }
+    catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  document.querySelectorAll('[data-isil]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('Bu işletme ve ona ait tüm kayıtlar silinecek. Emin misiniz?')) return;
+      try { await cagir(api.isletmeSil(Number(b.dataset.isil))); bildir('Silindi.', 'basari'); sayfaAyarlar(); }
+      catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
+
+  el('gncKontrol').onclick = async () => {
+    el('gncDurum').textContent = 'Kontrol ediliyor…';
+    try {
+      const r = await cagir(api.guncellemeKontrol());
+      el('gncDurum').textContent = r && r.mesaj ? r.mesaj : 'Kontrol tamamlandı.';
+    } catch (e) { el('gncDurum').textContent = 'Kontrol edilemedi: ' + e.message; }
+  };
+}
+
+function baslat() {
+  D.daralt = localStorage.getItem('daralt') === '1';
+  sidebarUygula();
+  menuCiz();
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sayfa]');
+    if (b) git(b.dataset.sayfa);
+  });
+
+  el('toggleSidebar').onclick = () => { D.daralt = !D.daralt; sidebarUygula(); };
+  el('panelKatman').onclick = panelKapat;
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') panelKapat();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      D.daralt = !D.daralt;
+      sidebarUygula();
+    }
+  });
+
+  api.surum().then((r) => {
+    if (r && r.ok) el('surumEtiket').textContent = 'sürüm ' + r.veri.surum;
+  });
+
+  api.guncellemeDinle((veri) => {
+    if (veri.tur === 'hazir') {
+      bildir(`Yeni sürüm indirildi (<b>${veri.surum}</b>). Uygulamayı kapatınca kurulacak.`, 'basari');
+    } else if (veri.tur === 'var') {
+      bildir(`Yeni sürüm bulundu: <b>${veri.surum}</b> — indiriliyor…`);
+    }
+  });
+
+  git('genel');
+}
+
+baslat();

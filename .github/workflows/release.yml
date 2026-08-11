@@ -1,0 +1,38 @@
+name: Windows kurulumu yayınla
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bağımlılıklar
+        run: npm ci
+
+      - name: Testler
+        run: node test/dogrula.js
+
+      - name: Tailwind derle
+        run: npx tailwindcss -i src/renderer/input.css -o src/renderer/styles.css --minify
+
+      - name: Kurulum dosyasını üret ve yayınla
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-setup
+          path: dist/*.exe
