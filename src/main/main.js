@@ -131,6 +131,24 @@ function pencereOlustur() {
   });
 }
 
+// node-sqlite3-wasm kilitlemeyi "<dosya>.lock" adlı bir klasör oluşturarak yapar.
+// Program çökerse ya da zorla kapatılırsa bu klasör kalır ve sonraki her açılış
+// "database is locked" verir. Tek kopya kilidini biz tuttuğumuz için, burada
+// görülen kilit klasörü kesinlikle artıktır ve silinebilir.
+function artikKilidiTemizle(dosyaYolu) {
+  const kilit = dosyaYolu + '.lock';
+  try {
+    if (fs.existsSync(kilit)) {
+      fs.rmSync(kilit, { recursive: true, force: true });
+      kayit(`Artık kalmış kilit klasörü silindi: ${kilit}`);
+      return true;
+    }
+  } catch (e) {
+    hataYaz('kilit temizleme', e);
+  }
+  return false;
+}
+
 function tanila(dosyaYolu) {
   const klasor = path.dirname(dosyaYolu);
   const b = { yol: dosyaYolu, klasor, uzunluk: dosyaYolu.length, platform: process.platform };
@@ -148,6 +166,8 @@ function tanila(dosyaYolu) {
   } catch {
     b.dosyaBoyutu = null;
   }
+
+  b.kilitVar = fs.existsSync(dosyaYolu + '.lock');
 
   try {
     const deneme = path.join(klasor, 'yazma-testi.tmp');
@@ -174,6 +194,11 @@ function tanila(dosyaYolu) {
 }
 
 function tesis(bilgi) {
+  if (bilgi.kilitVar) {
+    return 'Veri dosyasının yanında artık kalmış bir kilit klasörü var '
+         + '(program daha önce zorla kapatılmış olabilir). "Onar" düğmesi bunu temizler; '
+         + 'verileriniz silinmez.';
+  }
   if (bilgi.motorCalisiyor === false) {
     return 'Veritabanı motoru (SQLite) yüklenemedi. Kurulum eksik ya da bir güvenlik '
          + 'yazılımı engelliyor olabilir. Programı kaldırıp yeniden kurmayı deneyin.';
@@ -202,6 +227,7 @@ function veritabaniniAc() {
 
   for (const y of yollar) {
     try {
+      artikKilidiTemizle(y);
       db.ac(y);
       kayit(`Veritabanı açıldı: ${y}`);
       dbHatasi = null;
@@ -361,19 +387,33 @@ kanal('panoyaKopyala', (metin) => {
 
 kanal('vtOnar', () => {
   const kaynak = VERI_DOSYASI();
-  if (fs.existsSync(kaynak)) {
+
+  // Önce en zararsız onarım: artık kalmış kilidi temizleyip yeniden dene.
+  // Bu çoğu durumda yeterlidir ve veriye hiç dokunmaz.
+  const kilitVardi = artikKilidiTemizle(kaynak);
+  if (kilitVardi) {
+    veritabaniniAc();
+    if (!dbHatasi) return { yontem: 'kilit', veriKorundu: true };
+  }
+
+  const bosDosya = fs.existsSync(kaynak) && fs.statSync(kaynak).size === 0;
+  if (fs.existsSync(kaynak) && !bosDosya) {
     const damga = new Date().toISOString().replace(/[:.]/g, '-');
     const hedef = `${kaynak}.bozuk-${damga}`;
     fs.renameSync(kaynak, hedef);
     kayit(`Bozuk veritabanı bir kenara alındı: ${hedef}`);
+  } else if (bosDosya) {
+    fs.unlinkSync(kaynak);
+    kayit('Boş veri dosyası silindi.');
   }
   for (const ek of ['-journal', '-wal', '-shm']) {
     const y = kaynak + ek;
     if (fs.existsSync(y)) fs.unlinkSync(y);
   }
+
   veritabaniniAc();
   if (dbHatasi) throw new Error(dbHatasi);
-  return true;
+  return { yontem: bosDosya ? 'bos-dosya' : 'yeniden-kurulum', veriKorundu: bosDosya };
 }, true);
 
 kanal('gunluguAc', () => { shell.showItemInFolder(GUNLUK_DOSYASI()); return true; }, true);
@@ -395,6 +435,7 @@ kanal('hepsiniSifirla', async () => {
 
   db.kapat();
   const kaynak = VERI_DOSYASI();
+  artikKilidiTemizle(kaynak);
   let yedek = null;
   if (fs.existsSync(kaynak)) {
     const damga = new Date().toISOString().replace(/[:.]/g, '-');

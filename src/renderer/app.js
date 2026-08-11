@@ -176,6 +176,7 @@ function vtHatasiCiz(durum) {
                     ? 'HAYIR — ' + (durum.tani.yazmaHatasi || '') : 'evet'],
                   ['Veritabanı motoru', durum.tani.motorCalisiyor === false
                     ? 'YÜKLENEMEDİ — ' + (durum.tani.motorHatasi || '') : 'çalışıyor'],
+                  ['Artık kilit klasörü', durum.tani.kilitVar ? 'VAR — temizlenmeli' : 'yok'],
                   ['Dosya boyutu', durum.tani.dosyaBoyutu === null
                     ? 'dosya yok' : durum.tani.dosyaBoyutu + ' bayt'],
                   ['Yol uzunluğu', durum.tani.uzunluk + ' karakter'],
@@ -202,8 +203,11 @@ function vtHatasiCiz(durum) {
     </div>`;
   el('vtOnar').onclick = async () => {
     try {
-      await cagir(api.vtOnar());
-      bildir('Veritabanı yeniden oluşturuldu.', 'basari');
+      const r = await cagir(api.vtOnar());
+      bildir(r.veriKorundu
+        ? '<b>Onarıldı.</b> Takılı kalan kilit temizlendi, verileriniz olduğu gibi duruyor.'
+        : '<b>Onarıldı.</b> Bozuk dosya kenara alındı, program temiz bir veritabanıyla açıldı.',
+      'basari');
       git('genel');
     } catch (e) { bildir(kacar(e.message), 'hata'); }
   };
