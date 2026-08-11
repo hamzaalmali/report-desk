@@ -2,7 +2,27 @@
 
 'use strict';
 
-const ISLETMELER = [];
-const ESLESMELER = [];
+const ISLETMELER = [
+  'BALYA', 'DURSUNBEY', 'SAVAŞTEPE', 'BALIKESİR', 'BİGADİÇ', 'İVRİNDİ', 'KEPSUT',
+  'SINDIRGI', 'SUSURLUK', 'AVŞA', 'BANDIRMA', 'ERDEK', 'M.ADASI', 'GÖNEN', 'MANYAS',
+  'BİGA', 'ÇAN', 'YENİCE', 'AYVACIK', 'BAYRAMİÇ', 'BOZCAADA', 'ÇANAKKALE', 'GELİBOLU',
+  'GÖKÇEADA', 'ECEABAT', 'EZİNE', 'LAPSEKİ', 'KÜÇÜKKUYU', 'AKÇAY', 'ALTINOLUK',
+  'AYVALIK', 'BURHANİYE', 'EDREMİT', 'GÖMEÇ', 'HAVRAN', 'GEMLİK', 'İZNİK', 'ORHANGAZİ',
+  'İNEGÖL', 'YENİŞEHİR', 'KARACABEY', 'M.K.PAŞA', 'MUDANYA', 'NİLÜFER', 'HARMANCIK',
+  'BÜYÜKORHAN', 'KELES', 'ORHANELİ', 'OSMANGAZİ', 'ALTINOVA', 'ÇINARCIK', 'YALOVA',
+  'ARMUTLU', 'GÜRSU-KESTEL', 'YILDIRIM',
+];
+
+const ESLESMELER = [
+  ['ALTIEYLÜL', 'BALIKESİR'],
+  ['KARESİ', 'BALIKESİR'],
+  ['MARMARA', 'M.ADASI'],
+  ['MUSTAFAKEMALPAŞA', 'M.K.PAŞA'],
+  ['M.KEMALPAŞA', 'M.K.PAŞA'],
+  ['ÇİFTLİKKÖY', 'YALOVA'],
+  ['TERMAL', 'YALOVA'],
+  ['GÜRSU', 'GÜRSU-KESTEL'],
+  ['KESTEL', 'GÜRSU-KESTEL'],
+];
 
 module.exports = { ISLETMELER, ESLESMELER };

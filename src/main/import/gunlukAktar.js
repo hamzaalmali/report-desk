@@ -207,23 +207,10 @@ function ilIlceTara(ws, tablo, gunluk) {
   return oneriler;
 }
 
-async function gunlukAktar(dosyalar, secenekler = {}) {
+async function birGunAktar(dosyalar, tarih, secenekler = {}) {
   const gunluk = { satirlar: [], uyarilar: [], eslesmez: new Map(), taninmayan: [] };
   const tablo = eslesmeTablosu();
   const katMap = db.kategoriHaritasi();
-
-  let tarih = secenekler.tarih || null;
-  if (!tarih) {
-    for (const d of dosyalar) {
-      const t = tarihiCikar(d);
-      if (t) { tarih = t; break; }
-    }
-  }
-  if (!tarih) {
-    throw new Error(
-      'Tarih belirlenemedi. Dosya adlarında GG.AA.YYYY yok — lütfen tarihi elle seçin.'
-    );
-  }
 
   const bulunanlar = new Map();
   const eslesmezKategori = new Map();
@@ -339,6 +326,7 @@ async function gunlukAktar(dosyalar, secenekler = {}) {
 
   return {
     tarih,
+    dosyalar: dosyalar.map((d) => path.basename(d)),
     kategoriler: yaziliKategoriler,
     isaretToplam: yaziliKategoriler.reduce((s, k) => s + k.adet, 0),
     satirlar: gunluk.satirlar,
@@ -350,4 +338,44 @@ async function gunlukAktar(dosyalar, secenekler = {}) {
   };
 }
 
-module.exports = { gunlukAktar, tarihiCikar, raporBul, baslikSutunu, isletmeyeEslestir };
+async function gunlukAktar(dosyalar, secenekler = {}) {
+  if (secenekler.tarih) {
+    const g = await birGunAktar(dosyalar, secenekler.tarih, secenekler);
+    return { gunler: [g], tarihsiz: [], cokluMu: false };
+  }
+
+  const gruplar = new Map();
+  const tarihsiz = [];
+  for (const d of dosyalar) {
+    const t = tarihiCikar(d);
+    if (!t) { tarihsiz.push(path.basename(d)); continue; }
+    if (!gruplar.has(t)) gruplar.set(t, []);
+    gruplar.get(t).push(d);
+  }
+
+  if (!gruplar.size) {
+    throw new Error(
+      'Hiçbir dosya adında GG.AA.YYYY bulunamadı — tarihi elle seçip tekrar deneyin.'
+    );
+  }
+
+  const gunler = [];
+  for (const t of [...gruplar.keys()].sort()) {
+    try {
+      gunler.push(await birGunAktar(gruplar.get(t), t, secenekler));
+    } catch (e) {
+      gunler.push({
+        tarih: t,
+        dosyalar: gruplar.get(t).map((d) => path.basename(d)),
+        hata: e.message,
+        kategoriler: [], isaretToplam: 0, satirlar: [], uyarilar: [],
+        eslesmez: [], eklenenIsletmeler: [], taninmayan: [], oneriAdet: 0,
+      });
+    }
+  }
+  return { gunler, tarihsiz, cokluMu: gruplar.size > 1 };
+}
+
+module.exports = {
+  gunlukAktar, birGunAktar, tarihiCikar, raporBul, baslikSutunu, isletmeyeEslestir,
+};

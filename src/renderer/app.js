@@ -649,10 +649,11 @@ async function sayfaAktar() {
         yeniIsletmeEkle: el('yeniIsletme').checked,
       }));
       aktarSonucuCiz(r);
-      bildir(r.isaretToplam
-        ? `<b>Aktarım tamamlandı.</b><br>${tarihYaz(r.tarih)} — ${r.isaretToplam} işaretleme yazıldı.`
+      const toplam = r.gunler.reduce((s, g) => s + g.isaretToplam, 0);
+      bildir(toplam
+        ? `<b>Aktarım tamamlandı.</b><br>${r.gunler.length} gün — ${toplam} işaretleme yazıldı.`
         : `<b>Aktarım bitti ama hiçbir şey işaretlenmedi.</b><br>Ayrıntı ekranda.`,
-      r.isaretToplam ? 'basari' : 'hata');
+      toplam ? 'basari' : 'hata');
     } catch (e) {
       el('aktarSonuc').innerHTML =
         `<div class="card border-danger/40 p-4 text-danger">${kacar(e.message)}</div>`;
@@ -663,9 +664,42 @@ async function sayfaAktar() {
   };
 }
 
-function aktarSonucuCiz(r) {
-  const basarili = r.isaretToplam > 0;
+function aktarSonucuCiz(toplu) {
+  const toplam = toplu.gunler.reduce((s, g) => s + g.isaretToplam, 0);
   el('aktarSonuc').innerHTML = `
+    ${toplu.cokluMu ? `
+      <div class="card mb-3 border-brand-2/40">
+        <div class="flex items-center justify-between p-4">
+          <div>
+            <div class="font-medium">${toplu.gunler.length} ayrı gün aktarıldı</div>
+            <div class="text-[11.5px] text-fg-3">
+              Dosyalar adlarındaki tarihe göre ayrıldı · toplam ${toplam} işaretleme</div>
+          </div>
+          <div class="flex flex-wrap justify-end gap-1">
+            ${toplu.gunler.map((g) => `
+              <button class="chip ${g.isaretToplam
+                ? 'border-brand-2/50 text-brand' : 'border-danger/50 text-danger'}"
+                data-gunegit="${g.tarih}">${tarihYaz(g.tarih)} · ${g.isaretToplam}</button>`).join('')}
+          </div>
+        </div>
+      </div>` : ''}
+    ${toplu.tarihsiz.length ? `
+      <div class="card mb-3 border-warn/40 p-3 text-[12px]">
+        ${svg('uyari', 'inline size-3.5 -mt-0.5')} Adında tarih bulunmayan
+        ${toplu.tarihsiz.length} dosya atlandı: ${toplu.tarihsiz.map(kacar).join(', ')}
+        <span class="text-fg-3">— bunları tek başına seçip tarihi elle verin.</span>
+      </div>` : ''}
+    <div class="space-y-3">${toplu.gunler.map((g, ix) => gunSonucuCiz(g, ix)).join('')}</div>`;
+
+  document.querySelectorAll('[data-gunegit]').forEach((b) => {
+    b.onclick = () => { D.tarih = b.dataset.gunegit; git('gunluk'); };
+  });
+  toplu.gunler.forEach((g, ix) => gunSonucunuBagla(g, ix));
+}
+
+function gunSonucuCiz(r, ix) {
+  const basarili = r.isaretToplam > 0;
+  return `
     <div class="card ${basarili ? 'border-brand-2/50' : 'border-danger/50'}">
       <div class="card-head ${basarili ? 'bg-brand-dim/40' : 'bg-danger/10'}">
         <div class="flex items-center gap-2">
@@ -680,10 +714,14 @@ function aktarSonucuCiz(r) {
               ${r.kategoriler.filter((k) => k.otomatik).length} kategori</div>
           </div>
         </div>
-        <button class="btn btn-sm ${basarili ? 'btn-brand' : ''}" id="gunuAc">Günü aç</button>
+        <button class="btn btn-sm ${basarili ? 'btn-brand' : ''}" data-gunac="${ix}">Günü aç</button>
       </div>
       <div class="space-y-3 p-4">
-        ${!basarili ? `
+        ${r.hata ? `
+          <div class="rounded-md border border-danger/40 bg-danger/10 p-3 text-[12.5px]">
+            ${kacar(r.hata)}
+          </div>` : ''}
+        ${!basarili && !r.hata ? `
           <div class="rounded-md border border-danger/40 bg-danger/10 p-3 text-[12.5px]">
             Raporlar okundu ama ilçelerin hiçbiri bir işletmeyle eşleşmedi.
             ${r.eslesmez.length
@@ -703,7 +741,7 @@ function aktarSonucuCiz(r) {
           <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
             ${svg('uyari', 'inline size-3.5 -mt-0.5')} İL-İLÇE raporunda <b>${r.oneriAdet}</b> kayıt var —
             il/ilçe bilgisi olmadığı için otomatik işaretlenmedi.
-            <button class="ml-1 text-brand hover:underline" id="oneriGit">Önerilere git</button>
+            <button class="ml-1 text-brand hover:underline" data-onerigit="${ix}">Önerilere git</button>
           </div>` : ''}
         ${r.eslesmez.length ? `
           <details class="rounded-md border border-warn/40 bg-bg-200 p-3 text-[11.5px]" open>
@@ -716,7 +754,7 @@ function aktarSonucuCiz(r) {
             </div>
             <table class="mt-2 w-full text-[11.5px]">
               <tbody>
-                ${r.eslesmez.map((e, ix) => `
+                ${r.eslesmez.map((e, ei) => `
                   <tr class="border-t border-line">
                     <td class="py-1.5 pr-2 font-medium">${kacar(e.deger)}
                       <span class="text-fg-3">×${e.adet}</span></td>
@@ -724,12 +762,12 @@ function aktarSonucuCiz(r) {
                       ? `<span class="chip border-brand-2/40 text-brand">öneri: ${kacar(e.oneri.ad)}</span>`
                       : kacar(e.sayfa)}</td>
                     <td class="py-1.5 pr-2">
-                      <select class="input py-1" data-esec="${ix}">
+                      <select class="input py-1" data-esec="${ix}-${ei}">
                         <option value="">— işletme seçin —</option>
                       </select>
                     </td>
                     <td class="py-1.5 text-right">
-                      <button class="btn btn-sm" data-eekle="${ix}"
+                      <button class="btn btn-sm" data-eekle="${ix}-${ei}"
                               data-deger="${kacar(e.deger)}">Kural ekle</button>
                     </td>
                   </tr>`).join('')}
@@ -742,37 +780,35 @@ function aktarSonucuCiz(r) {
           `<div class="text-[11.5px] text-warn">${kacar(u)}</div>`).join('') : ''}
       </div>
     </div>`;
-  el('gunuAc').onclick = () => { D.tarih = r.tarih; git('gunluk'); };
-  const o = el('oneriGit');
-  if (o) o.onclick = () => { D.tarih = r.tarih; git('oneri'); };
-
-  if (r.eslesmez.length) eslesmezleriBagla(r);
 }
 
-async function eslesmezleriBagla(r) {
+async function gunSonucunuBagla(r, ix) {
+  const gunAc = document.querySelector(`[data-gunac="${ix}"]`);
+  if (gunAc) gunAc.onclick = () => { D.tarih = r.tarih; git('gunluk'); };
+  const o = document.querySelector(`[data-onerigit="${ix}"]`);
+  if (o) o.onclick = () => { D.tarih = r.tarih; git('oneri'); };
+  if (!r.eslesmez.length) return;
+
   const isletmeler = await cagir(api.isletmeler());
   const secenekler = isletmeler.map((i) => `<option value="${i.id}">${kacar(i.ad)}</option>`).join('');
 
-  document.querySelectorAll('[data-esec]').forEach((s) => {
-    s.insertAdjacentHTML('beforeend', secenekler);
-    const e = r.eslesmez[Number(s.dataset.esec)];
-    if (e.oneri) s.value = String(e.oneri.isletme_id);
-  });
-
-  document.querySelectorAll('[data-eekle]').forEach((b) => {
-    b.onclick = async () => {
-      const ix = b.dataset.eekle;
-      const sec = document.querySelector(`[data-esec="${ix}"]`);
+  r.eslesmez.forEach((e, ei) => {
+    const sec = document.querySelector(`[data-esec="${ix}-${ei}"]`);
+    const btn = document.querySelector(`[data-eekle="${ix}-${ei}"]`);
+    if (!sec || !btn) return;
+    sec.insertAdjacentHTML('beforeend', secenekler);
+    if (e.oneri) sec.value = String(e.oneri.isletme_id);
+    btn.onclick = async () => {
       if (!sec.value) return bildir('Önce bir işletme seçin.', 'hata');
       try {
         await cagir(api.eslesmeEkle({
-          kaynak_deger: b.dataset.deger, isletme_id: Number(sec.value), tip: 'TAM',
+          kaynak_deger: btn.dataset.deger, isletme_id: Number(sec.value), tip: 'TAM',
         }));
-        b.textContent = 'Eklendi ✓';
-        b.disabled = true;
+        btn.textContent = 'Eklendi ✓';
+        btn.disabled = true;
         sec.disabled = true;
         bildir('Kural eklendi. Raporu yeniden aktarınca uygulanacak.', 'basari');
-      } catch (e) { bildir(kacar(e.message), 'hata'); }
+      } catch (err) { bildir(kacar(err.message), 'hata'); }
     };
   });
 }

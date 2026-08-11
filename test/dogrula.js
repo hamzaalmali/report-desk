@@ -45,8 +45,13 @@ async function main() {
 
   console.log('\nŞema ve başlangıç durumu');
   kontrol('9 kategori kuruldu', db.kategoriler().length === 9);
-  kontrol('işletme listesi boş başlıyor', db.isletmeler().length === 0, String(db.isletmeler().length));
-  kontrol('eşleştirme tablosu boş başlıyor', db.eslesmeler().length === 0, String(db.eslesmeler().length));
+  const varsayilan = db.isletmeler();
+  kontrol('varsayılan işletme listesi kurulu', varsayilan.length === 55, String(varsayilan.length));
+  kontrol('varsayılan sıra ilk açılışta doğru',
+    varsayilan[0].ad === 'BALYA' && varsayilan[54].ad === 'YILDIRIM',
+    `${varsayilan[0].ad} … ${varsayilan[varsayilan.length - 1].ad}`);
+  kontrol('varsayılan eşleştirme kuralları kurulu',
+    db.eslesmeler().length === 64, String(db.eslesmeler().length));
 
   if (!KAYNAK) {
     console.log('\n! Geniş tablo düzeninde .xlsx bulunamadı — Excel testleri atlandı.');
@@ -65,11 +70,8 @@ async function main() {
     `${aktarim.toplamKayit} / ${okuma.kayitlar.length}`);
   const ozet = db.ozet();
   kontrol('gün sayısı tutuyor', ozet.gun === aktarim.gunler.length);
-  kontrol('işletme listesi dosyadan öğrenildi',
-    db.isletmeler().length === okuma.isletmeler.length,
-    `${db.isletmeler().length} / ${okuma.isletmeler.length}`);
-  kontrol('her işletme için birebir kural kuruldu',
-    db.eslesmeler().length === db.isletmeler().length);
+  kontrol('dosyadaki işletmeler zaten tanınıyor',
+    aktarim.yeniIsletmeler.length === 0, aktarim.yeniIsletmeler.join(', '));
 
   const dosyaSirasi = okuma.isletmeler.join('|');
   kontrol('işletme sırası kaynak dosyayla birebir',
@@ -125,8 +127,10 @@ async function main() {
   if (!gunlukDosyalar.length) {
     console.log('  ! günlük rapor dosyası bulunamadı, atlandı.');
   } else {
-    const r = await gunlukAktar(gunlukDosyalar);
+    const toplu = await gunlukAktar(gunlukDosyalar);
+    const r = toplu.gunler[0];
     kontrol('tarih dosya adından okundu', /^\d{4}-\d{2}-\d{2}$/.test(r.tarih), r.tarih);
+    kontrol('tek güne ait dosyalar tek gün üretiyor', toplu.gunler.length === 1);
     kontrol('tüm dosyalar tanındı', r.taninmayan.length === 0, r.taninmayan.join(', '));
     kontrol('otomatik kategoriler işaretlendi',
       r.kategoriler.filter((k) => k.otomatik && k.adet > 0).length >= 5,
@@ -139,13 +143,39 @@ async function main() {
       for (const e of r.eslesmez) {
         db.eslesmeEkle({ kaynak_deger: e.deger, isletme_id: hedef.id, tip: 'TAM' });
       }
-      const r2 = await gunlukAktar(gunlukDosyalar);
+      const r2 = (await gunlukAktar(gunlukDosyalar)).gunler[0];
       kontrol('kural eklendikten sonra eşleşmeyen kalmıyor',
         r2.eslesmez.length === 0,
         r2.eslesmez.map((e) => e.deger).join(', '));
     } else {
       kontrol('eşleşmeyen değer yok', true);
     }
+  }
+
+  console.log('\nÇoklu gün aktarımı');
+  if (gunlukDosyalar.length) {
+    const ikinci = path.join(gecici, 'ikinci-gun');
+    fs.mkdirSync(ikinci, { recursive: true });
+    const yeniTarih = '01.01.2020';
+    const kopyalar = gunlukDosyalar.map((d) => {
+      const yeni = path.join(ikinci, path.basename(d).replace(/\d{2}\.\d{2}\.\d{4}/, yeniTarih));
+      fs.copyFileSync(d, yeni);
+      return yeni;
+    });
+    const toplu = await gunlukAktar([...gunlukDosyalar, ...kopyalar]);
+    kontrol('iki ayrı gün ayrı ayrı yazıldı', toplu.gunler.length === 2,
+      toplu.gunler.map((g) => g.tarih).join(', '));
+    const m = path.basename(gunlukDosyalar[0]).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    const asilTarih = `${m[3]}-${m[2]}-${m[1]}`;
+    kontrol('tarihler dosya adlarından doğru okundu',
+      toplu.gunler.map((g) => g.tarih).sort().join(',') === `2020-01-01,${asilTarih}`,
+      toplu.gunler.map((g) => g.tarih).join(','));
+    kontrol('her gün kendi kayıtlarını aldı',
+      toplu.gunler.every((g) => g.isaretToplam > 0),
+      toplu.gunler.map((g) => `${g.tarih}:${g.isaretToplam}`).join(' '));
+    kontrol('tarihsiz dosya yok', toplu.tarihsiz.length === 0);
+  } else {
+    console.log('  ! günlük rapor dosyası yok, atlandı.');
   }
 
   bitir();

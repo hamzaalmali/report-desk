@@ -7,6 +7,7 @@ const path = require('node:path');
 const { Database } = require('node-sqlite3-wasm');
 const { KATEGORILER } = require('../../shared/kategoriler');
 const { key } = require('../../shared/tr');
+const { ISLETMELER, ESLESMELER } = require('./seed');
 
 let db = null;
 let dbYolu = null;
@@ -25,6 +26,27 @@ function kur() {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(sql);
   kategorileriSenkronla();
+  if (sayi('isletme') === 0 && db.get("SELECT deger FROM ayar WHERE anahtar = 'ilkKurulum'") == null) {
+    ilkKurulum();
+  }
+}
+
+function ilkKurulum() {
+  islem(() => {
+    ISLETMELER.forEach((ad, i) => isletmeEkle(ad, i + 1));
+    const harita = isletmeHaritasi();
+    for (const [kaynak, hedef] of ESLESMELER) {
+      const isl = harita.get(key(hedef));
+      if (isl) {
+        db.run(
+          `INSERT OR IGNORE INTO eslesme (kaynak_deger, isletme_id, tip)
+           VALUES (:k, :i, 'TAM')`,
+          { ':k': kaynak, ':i': isl.id }
+        );
+      }
+    }
+    db.run("INSERT OR REPLACE INTO ayar (anahtar, deger) VALUES ('ilkKurulum', datetime('now'))");
+  });
 }
 
 function sayi(tablo) {
