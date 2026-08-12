@@ -140,7 +140,7 @@ function anahtarAra(tablo, metin) {
   return null;
 }
 
-function isletmeyeEslestir(tablo, { il, ilce, mahalle, koy, mudurluk }) {
+function isletmeyeEslestir(tablo, { il, ilce, mahalle, koy, mudurluk, ekip }) {
   let t = anahtarAra(tablo, `${mahalle || ''} ${koy || ''}`);
   if (t) return t;
 
@@ -152,20 +152,23 @@ function isletmeyeEslestir(tablo, { il, ilce, mahalle, koy, mudurluk }) {
     if (t) return t;
   }
 
-  return tamEslestir(tablo, mudurluk);
+  t = tamEslestir(tablo, mudurluk);
+  if (t) return t;
+
+  return metindenEslestir(tablo, ekip);
 }
 
-function metindenIsletme(tablo, metin) {
-  if (!metin || !metin.trim()) return '';
+function metindenEslestir(tablo, metin) {
+  if (!metin || !metin.trim()) return null;
   const t = anahtarAra(tablo, metin);
-  if (t) return t.isletme;
+  if (t) return t;
 
   const ara = key(metin);
-  let enIyi = '', sonuc = '';
+  let enIyi = '', sonuc = null;
   for (const e of tablo) {
     if (e.anahtar.length > 3 && ara.includes(e.anahtar) && e.anahtar.length > enIyi.length) {
       enIyi = e.anahtar;
-      sonuc = e.isletme;
+      sonuc = e;
     }
   }
   return sonuc;
@@ -195,6 +198,7 @@ function sayfayiTara(ws, rapor, tablo, gunluk) {
   const cMah = baslikSutunu(basliklar, rapor.mahalle);
   const cKoy = baslikSutunu(basliklar, rapor.koy);
   const cMud = baslikSutunu(basliklar, rapor.mudurluk);
+  const cEkip = baslikSutunu(basliklar, 'EKİP');
 
   if (!cIlce && !cIl && !cMud) {
     gunluk.uyarilar.push(`${ws.name}: il/ilçe sütunu bulunamadı, atlandı.`);
@@ -203,19 +207,22 @@ function sayfayiTara(ws, rapor, tablo, gunluk) {
 
   const bulunan = new Set();
   const eslesmezDegerler = new Map();
-  let kayit = 0;
+  let kayit = 0, ekipten = 0;
 
   for (let r = 2; r <= ws.rowCount; r++) {
     if (bosSatir(ws, r, sonSutun)) continue;
     const row = ws.getRow(r);
     const al = (c) => (c ? hucreMetni(row.getCell(c)) : '');
     const es = isletmeyeEslestir(tablo, {
-      il: al(cIl), ilce: al(cIlce), mahalle: al(cMah), koy: al(cKoy), mudurluk: al(cMud),
+      il: al(cIl), ilce: al(cIlce), mahalle: al(cMah), koy: al(cKoy),
+      mudurluk: al(cMud), ekip: al(cEkip),
     });
-    if (es) bulunan.add(es.isletme_id);
-    else {
+    if (es) {
+      bulunan.add(es.isletme_id);
+      if (!al(cIlce) && !al(cIl) && !al(cMud) && al(cEkip)) ekipten++;
+    } else {
       const il = al(cIl), ilce = al(cIlce), mud = al(cMud);
-      const deger = ilce || il || mud;
+      const deger = ilce || il || mud || al(cEkip);
       if (deger) {
         const anahtar = key(deger);
         eslesmezDegerler.set(anahtar, deger);
@@ -228,7 +235,8 @@ function sayfayiTara(ws, rapor, tablo, gunluk) {
   }
 
   gunluk.satirlar.push(
-    `${rapor.kategori} ← ${ws.name} (${kayit} kayıt → ${bulunan.size} işletme)`
+    `${rapor.kategori} ← ${ws.name} (${kayit} kayıt → ${bulunan.size} işletme`
+    + `${ekipten ? `, ${ekipten}'i ekip adından` : ''})`
   );
   return { bulunan, eslesmezDegerler };
 }
@@ -240,19 +248,24 @@ function ilIlceTara(ws, tablo, gunluk) {
   const cKod = baslikSutunu(basliklar, 'KOD NO');
 
   const oneriler = [];
+  const bulunan = new Set();
+  let cozulemeyen = 0;
+
   for (let r = 2; r <= ws.rowCount; r++) {
     if (bosSatir(ws, r, sonSutun)) continue;
     const row = ws.getRow(r);
     const al = (c) => (c ? hucreMetni(row.getCell(c)) : '');
     const ekip = al(cEkip), unsur = al(cUnsur);
-    const tahmin = metindenIsletme(tablo, ekip) || metindenIsletme(tablo, unsur) || '?';
-    oneriler.push({ kod_no: al(cKod), tahmin, ekip, unsur });
+    const es = metindenEslestir(tablo, ekip) || metindenEslestir(tablo, unsur);
+    if (es) bulunan.add(es.isletme_id); else cozulemeyen++;
+    oneriler.push({ kod_no: al(cKod), tahmin: es ? es.isletme : '?', ekip, unsur });
   }
 
   gunluk.satirlar.push(
-    `IL_ILCE ← ${ws.name} (${oneriler.length} kayıt — sütun açıldı, işaretleme elle)`
+    `IL_ILCE ← ${ws.name} (${oneriler.length} kayıt → ${bulunan.size} işletme, `
+    + `ekip adından; ${cozulemeyen} kayıt çözülemedi)`
   );
-  return oneriler;
+  return { oneriler, bulunan, cozulemeyen };
 }
 
 async function birGunAktar(dosyalar, tarih, secenekler = {}) {
@@ -265,6 +278,7 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
   const bulunanlar = new Map();
   const eslesmezKategori = new Map();
   let oneriler = null;
+  let cozulemeyenIlIlce = 0;
 
   for (const dosya of dosyalar) {
     const wb = new ExcelJS.Workbook();
@@ -282,8 +296,12 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
     for (const [ws, rapor] of eslesen) {
 
       if (rapor.tip === 'ililce') {
-        oneriler = ilIlceTara(ws, tablo, gunluk);
-        if (!bulunanlar.has(rapor.kategori)) bulunanlar.set(rapor.kategori, new Set());
+        const sonuc = ilIlceTara(ws, tablo, gunluk);
+        oneriler = sonuc.oneriler;
+        cozulemeyenIlIlce += sonuc.cozulemeyen;
+        const mevcut = bulunanlar.get(rapor.kategori) || new Set();
+        for (const id of sonuc.bulunan) mevcut.add(id);
+        bulunanlar.set(rapor.kategori, mevcut);
       } else {
         const sonuc = sayfayiTara(ws, rapor, tablo, gunluk);
         if (sonuc) {
@@ -345,7 +363,13 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       if (!kat) continue;
       acilan.push(kat.id);
 
-      if (!kat.otomatik) { yaziliKategoriler.push({ kod, adet: 0, otomatik: false }); continue; }
+      // İL-İLÇE'de işaretler ekip adından çıkarılıyor: sıfırlama YOK, yalnız ekleme.
+      // Çözülemeyenleri Hamza elle işaretliyor, yeniden aktarım onları silmemeli.
+      if (!kat.otomatik) {
+        const adet = set.size ? db.otomatikIsaretle(tarih, kat.id, [...set], kat.genislik) : 0;
+        yaziliKategoriler.push({ kod, adet, otomatik: false });
+        continue;
+      }
 
       if (secenekler.uzerineYaz !== false) db.kategoriSifirla(tarih, kat.id, kat.genislik);
 
@@ -386,6 +410,7 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
     eklenenIsletmeler,
     taninmayan: gunluk.taninmayan,
     oneriAdet: oneriler ? oneriler.length : 0,
+    cozulemeyenIlIlce,
   };
 }
 

@@ -39,8 +39,8 @@ function ilkKurulum() {
       const isl = harita.get(key(hedef));
       if (isl) {
         db.run(
-          `INSERT OR IGNORE INTO eslesme (kaynak_deger, isletme_id, tip)
-           VALUES (:k, :i, 'TAM')`,
+          `INSERT INTO eslesme (kaynak_deger, isletme_id, tip) VALUES (:k, :i, 'TAM')
+           ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id`,
           { ':k': kaynak, ':i': isl.id }
         );
       }

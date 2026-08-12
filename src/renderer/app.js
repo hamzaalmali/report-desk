@@ -845,9 +845,12 @@ function gunSonucuCiz(r, ix) {
               </details>` : ''}
           </div>` : ''}
         ${r.oneriAdet ? `
-          <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
-            ${svg('uyari', 'inline size-3.5 -mt-0.5')} İL-İLÇE raporunda <b>${r.oneriAdet}</b> kayıt var —
-            il/ilçe bilgisi olmadığı için otomatik işaretlenmedi.
+          <div class="rounded-md border ${r.cozulemeyenIlIlce ? 'border-warn/40 bg-warn/10' : 'border-brand-2/40 bg-brand-dim/40'} p-3 text-[12px]">
+            ${svg(r.cozulemeyenIlIlce ? 'uyari' : 'ok', 'inline size-3.5 -mt-0.5')}
+            İL-İLÇE raporundaki <b>${r.oneriAdet}</b> kaydın
+            <b>${r.oneriAdet - r.cozulemeyenIlIlce}</b> tanesinin ilçesi ekip adından bulundu
+            ve işaretlendi.
+            ${r.cozulemeyenIlIlce ? `Kalan <b>${r.cozulemeyenIlIlce}</b> kayıt elle işaretlenmeli.` : ''}
             <button class="ml-1 text-brand hover:underline" data-onerigit="${ix}">Önerilere git</button>
           </div>` : ''}
         ${r.eslesmez.length ? `
@@ -1116,9 +1119,12 @@ async function sayfaOneri() {
 
   el('icerik').innerHTML = `
     <div class="mb-3 shrink-0 text-[12px] text-fg-3">
-      İL-İLÇE raporunda il/ilçe bilgisi gelmediği için otomatik işaretlenemeyen kayıtlar.
-      Tahmin sütunu ekip / şebeke unsuru metninden çıkarılmıştır — doğrulayıp
-      <button class="text-brand hover:underline" id="gunlugeGit2">Günlük Takip</button> ekranından elle işaretleyin.
+      İL-İLÇE raporunda il/ilçe bilgisi gelmeyen kayıtlar. İlçe, <b>ekip</b> (yoksa şebeke
+      unsuru) metninden çıkarılır; bulunanlar İL-İLÇE sütununa <b>işaretlenmiştir</b>.
+      <span class="text-danger">?</span> olanlar işaretlenmedi —
+      <button class="text-brand hover:underline" id="gunlugeGit2">Günlük Takip</button>
+      ekranından elle koyun. Sık geçen bir ekip adı varsa Eşleştirme'ye
+      <b>İÇERİR</b> kuralı ekleyerek kalıcı çözebilirsiniz.
     </div>
     <div class="card flex min-h-0 flex-1 flex-col overflow-hidden">
       <div class="min-h-0 flex-1 overflow-auto">

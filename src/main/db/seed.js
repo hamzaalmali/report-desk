@@ -14,6 +14,10 @@ const ISLETMELER = [
 ];
 
 const ESLESMELER = [
+  ['AKÇAY', 'EDREMİT'],
+  ['ALTINOLUK', 'EDREMİT'],
+  ['KÜÇÜKKUYU', 'AYVACIK'],
+  ['AVŞA', 'M.ADASI'],
   ['ALTIEYLÜL', 'BALIKESİR'],
   ['KARESİ', 'BALIKESİR'],
   ['MARMARA', 'M.ADASI'],

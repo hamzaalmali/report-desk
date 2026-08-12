@@ -10,7 +10,7 @@ const db = require('../src/main/db/db');
 const { genisTabloOku } = require('../src/main/import/genisTablo');
 const { gecmisiAktar } = require('../src/main/import/gecmisAktar');
 const {
-  gunlukAktar, raporBul, raporBulImza, raporBulDosyaAdi,
+  gunlukAktar, raporBul, raporBulImza, raporBulDosyaAdi, isletmeyeEslestir,
 } = require('../src/main/import/gunlukAktar');
 const { key } = require('../src/shared/tr');
 const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
@@ -233,6 +233,49 @@ async function main() {
       const dk = db.gunVerisi(t).satirlar.find((s) => s.kategori_kod === 'DURUM_KODU' && s.ariza_var);
       kontrol('kısmi aktarım seçilmeyen kategorileri silmiyor', !!dk);
     }
+  } else {
+    console.log('  ! günlük rapor dosyası yok, atlandı.');
+  }
+
+  console.log('\nEkip adından ilçe tespiti');
+  if (gunlukDosyalar.length) {
+    const r = (await gunlukAktar(gunlukDosyalar)).gunler[0];
+    const ilIlce = r.kategoriler.find((k) => k.kod === 'IL_ILCE');
+    kontrol('İL-İLÇE kayıtları ekip adından işaretleniyor',
+      ilIlce && ilIlce.adet > 0, JSON.stringify(ilIlce));
+    kontrol('çözülemeyen kayıt sayısı bildiriliyor',
+      typeof r.cozulemeyenIlIlce === 'number' && r.cozulemeyenIlIlce < r.oneriAdet,
+      `${r.cozulemeyenIlIlce} / ${r.oneriAdet}`);
+
+    const tablo = db.eslesmeler().map((e) => ({
+      anahtar: key(e.kaynak_deger), isletme: e.isletme, isletme_id: e.isletme_id, tip: e.tip,
+    }));
+    const ekipten = (metin) => (isletmeyeEslestir(tablo, { ekip: metin }) || {}).isletme;
+    kontrol('ekip metninden ilçe çıkarılıyor',
+      ekipten('YALOVA EKİP 1') === 'YALOVA'
+      && ekipten('947 16 BZY 947 KARACABEY 4X4') === 'KARACABEY'
+      && ekipten('NİLÜFER G') === 'NİLÜFER',
+      [ekipten('YALOVA EKİP 1'), ekipten('947 16 BZY 947 KARACABEY 4X4')].join(', '));
+    kontrol('belde ekibi bağlı ilçeye yazılıyor',
+      ekipten('AKÇAY SEPETLİ') === 'EDREMİT'
+      && ekipten('ALTINOLUK EKİBİ') === 'EDREMİT'
+      && ekipten('KÜÇÜKKUYU SEPETLİ') === 'AYVACIK',
+      [ekipten('AKÇAY SEPETLİ'), ekipten('KÜÇÜKKUYU SEPETLİ')].join(', '));
+    kontrol('ilçe içermeyen ekip adı zorlama eşleşme üretmiyor',
+      ekipten('16 CBZ 919 (MÜRACAAT EKİBİ)') === undefined,
+      String(ekipten('16 CBZ 919 (MÜRACAAT EKİBİ)')));
+
+    // ekipten gelen işaretler elle konanları silmemeli
+    const t = r.tarih;
+    const kat = db.kategoriHaritasi();
+    const elle = db.isletmeler().find((i) => !db.gunVerisi(t).satirlar
+      .some((s) => s.kategori_kod === 'IL_ILCE' && s.isletme_id === i.id && s.tutanak_gerekli));
+    db.hucreGuncelle({ tarih: t, isletme_id: elle.id, kategori_id: kat.get('IL_ILCE').id, alan: 'tutanak_gerekli', deger: 1 });
+    await gunlukAktar(gunlukDosyalar);
+    const s = db.gunVerisi(t).satirlar
+      .find((x) => x.kategori_kod === 'IL_ILCE' && x.isletme_id === elle.id);
+    kontrol('elle konan İL-İLÇE işareti yeniden aktarımda duruyor',
+      !!s && s.tutanak_gerekli === 1, elle.ad);
   } else {
     console.log('  ! günlük rapor dosyası yok, atlandı.');
   }
