@@ -12,6 +12,8 @@ let sock = null;
 let oturumYolu = null;
 let dinleyici = () => { };
 let kapatiliyor = false;
+let komutIsleyici = null;
+const sonKomut = new Map();
 let yenidenDeneme = 0;
 let zamanlayici = null;
 
@@ -37,9 +39,10 @@ function oturumVarMi() {
   }
 }
 
-function kur(klasor, olayFn) {
+function kur(klasor, olayFn, komutFn) {
   oturumYolu = klasor;
   if (olayFn) dinleyici = olayFn;
+  if (komutFn) komutIsleyici = komutFn;
   fs.mkdirSync(oturumYolu, { recursive: true });
   bildir({ asama: oturumVarMi() ? 'kapali' : 'kapali' });
 }
@@ -73,6 +76,10 @@ async function baslat() {
   });
 
   sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('messages.upsert', (olay) => {
+    if (olay.type !== 'notify') return;
+    for (const m of olay.messages || []) gelenMesaj(m).catch(() => { });
+  });
 
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u;
@@ -121,6 +128,42 @@ async function baslat() {
   });
 
   return durumAl();
+}
+
+const KOMUT_BEKLEME = 15000;
+
+function mesajMetni(m) {
+  const i = m.message || {};
+  return i.conversation
+    || (i.extendedTextMessage && i.extendedTextMessage.text)
+    || (i.imageMessage && i.imageMessage.caption)
+    || (i.videoMessage && i.videoMessage.caption)
+    || '';
+}
+
+function numaraCikar(jid) {
+  return String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+}
+
+async function gelenMesaj(m) {
+  if (!komutIsleyici || !m || !m.key || m.key.fromMe) return;
+  const metin = mesajMetni(m).trim();
+  if (!metin) return;
+
+  const sohbet = m.key.remoteJid;
+  const gonderen = numaraCikar(m.key.participant || sohbet);
+  if (!gonderen) return;
+
+  const simdi = Date.now();
+  if (simdi - (sonKomut.get(gonderen) || 0) < KOMUT_BEKLEME) return;
+
+  const yanit = await komutIsleyici({ gonderen, metin, sohbet, grupMu: String(sohbet).endsWith('@g.us') });
+  if (!yanit) return;
+
+  sonKomut.set(gonderen, simdi);
+  try {
+    await sock.sendMessage(sohbet, { text: yanit }, { quoted: m });
+  } catch { }
 }
 
 function sessizGunluk() {

@@ -18,6 +18,7 @@ const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
 const { vardiyaIceAktar } = require('../src/main/import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('../src/main/export/vardiyaDisaAktar');
 const kilit = require('../src/main/kilit');
+const komut = require('../src/main/whatsapp/komut');
 
 const KOK = process.argv[3] || path.join(__dirname, '..', '..');
 
@@ -422,6 +423,31 @@ async function main() {
 
     db.waGrupSec('1@g.us', false);
     kontrol('seçim kaldırılabiliyor', db.waSeciliGruplar().length === 0);
+  }
+
+  console.log('\nWhatsApp komutları');
+  {
+    const coz = (m) => komut.numaralariCoz(m).join(',');
+    kontrol('numara biçimleri tek forma geliyor',
+      coz('+90 538 817 94 95') === '905388179495'
+      && coz('0538 817 94 95') === '905388179495'
+      && coz('5388179495') === '905388179495'
+      && coz('905388179495') === '905388179495',
+      [coz('+90 538 817 94 95'), coz('0538 817 94 95'), coz('5388179495')].join(' | '));
+    kontrol('virgülle birden çok numara',
+      coz('+90 538 817 94 95, 0555 111 22 33') === '905388179495,905551112233');
+
+    kontrol('hava komutu tanınıyor',
+      ['hava durumu', 'Hava Durumu', 'HAVA DURUMU', 'hava durumu?', 'hava']
+        .every((m) => !!komut.komutBul(m)));
+    kontrol('benzeyen kelimeler komut sayılmıyor',
+      ['merhaba', 'havalimanı bilgisi', 'havale', ''].every((m) => komut.komutBul(m) === null));
+
+    const isle = komut.olustur({ izinliler: () => '905388179495', log: () => { } });
+    kontrol('izinsiz numaraya yanıt yok',
+      (await isle({ gonderen: '905001112233', metin: 'hava durumu' })) === null);
+    kontrol('izinli numara alakasız metne yanıt almıyor',
+      (await isle({ gonderen: '905388179495', metin: 'merhaba' })) === null);
   }
 
   console.log('\nUzaktan durdurma');

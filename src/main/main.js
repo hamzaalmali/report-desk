@@ -12,6 +12,8 @@ const { aylikDisaAktar, gunlukDisaAktar, AY_ADLARI } = require('./export/excelDi
 const { vardiyaIceAktar } = require('./import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('./export/vardiyaDisaAktar');
 const wa = require('./whatsapp/wa');
+const komut = require('./whatsapp/komut');
+const mgm = require('./hava/mgm');
 const kilit = require('./kilit');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
@@ -261,9 +263,13 @@ app.whenReady().then(() => {
     hataYaz('uzak durum kurulumu', e);
   }
   try {
-    wa.kur(path.join(app.getPath('userData'), 'whatsapp-oturum'), (d) => {
-      if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
-    });
+    wa.kur(
+      path.join(app.getPath('userData'), 'whatsapp-oturum'),
+      (d) => {
+        if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
+      },
+      komut.olustur({ izinliler: () => izinliNumaralar(), log: kayit })
+    );
     if (wa.oturumVarMi()) wa.baslat().catch((e) => hataYaz('whatsapp başlangıç', e));
   } catch (e) {
     hataYaz('whatsapp kurulumu', e);
@@ -282,6 +288,14 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+
+function izinliNumaralar() {
+  try {
+    const r = db.raw.get("SELECT deger FROM ayar WHERE anahtar = 'waIzinliNumaralar'");
+    if (r && r.deger != null && String(r.deger).trim()) return String(r.deger);
+  } catch { }
+  return komut.VARSAYILAN_NUMARALAR;
+}
 
 const KILITSIZ = new Set(['surum', 'kilitDurum', 'panoyaKopyala', 'gunluguAc', 'klasorAc']);
 
@@ -517,6 +531,14 @@ kanal('waDurum', () => wa.durumAl(), true);
 kanal('waBaslat', () => wa.baslat(), true);
 kanal('waDurdur', () => wa.durdur(), true);
 kanal('waCikis', () => wa.cikisYap(), true);
+
+kanal('waIzinliler', () => izinliNumaralar());
+kanal('waIzinlileriYaz', (metin) => {
+  db.raw.run("INSERT OR REPLACE INTO ayar (anahtar, deger) VALUES ('waIzinliNumaralar', :d)",
+    { ':d': String(metin || '') });
+  return izinliNumaralar();
+});
+kanal('havaDenemesi', () => mgm.havaMetni());
 
 kanal('waGruplar', () => db.waGruplar());
 kanal('waGruplariTazele', async () => db.waGruplariYaz(await wa.gruplariGetir()));

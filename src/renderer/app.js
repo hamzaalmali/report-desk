@@ -1536,6 +1536,28 @@ function waCiz(d) {
       ${waGonderBolumu(d.asama === 'bagli')}
 
       <div class="card mt-4">
+        <div class="card-head">
+          <div class="font-medium">Gelen mesaj komutları</div>
+          <button class="btn btn-sm" id="waHavaDene">Hava durumunu dene</button>
+        </div>
+        <div class="space-y-3 p-5">
+          <div class="text-[12px] text-fg-2">
+            Aşağıdaki numaralardan <b>“hava durumu”</b> yazan bir mesaj gelirse, Bursa ve
+            17 ilçesinin Meteoroloji verisi çekilip aynı sohbete yanıt olarak gönderilir.
+            Başka numaralara ve başka metinlere cevap verilmez.
+          </div>
+          <div class="flex items-end gap-2">
+            <label class="flex flex-1 flex-col gap-1">
+              <span class="text-[11px] text-fg-3">İzinli numaralar (virgülle, ülke koduyla)</span>
+              <input type="text" id="waIzinli" class="input" placeholder="905388179495" />
+            </label>
+            <button class="btn" id="waIzinliKaydet">Kaydet</button>
+          </div>
+          <div id="waHavaSonuc"></div>
+        </div>
+      </div>
+
+      <div class="card mt-4">
         <div class="card-head"><div class="font-medium">Bilinmesi gerekenler</div></div>
         <div class="space-y-2 p-5 text-[12px] text-fg-2">
           <div>· Oturum dosyaları: <span class="font-mono text-[11px] text-fg-3">${kacar(d.yol || '')}</span></div>
@@ -1548,6 +1570,7 @@ function waCiz(d) {
 
   waGruplariCiz();
   waGonderBagla(d.asama === 'bagli');
+  waKomutBagla();
 
   const bagla = (id, fn) => { const b = el(id); if (b) b.onclick = fn; };
   bagla('waGrupTazele', async () => {
@@ -1573,6 +1596,37 @@ function waCiz(d) {
       bildir('Oturum silindi.', 'basari');
     } catch (e) { bildir(kacar(e.message), 'hata'); }
   });
+}
+
+async function waKomutBagla() {
+  const kutu = el('waIzinli');
+  if (!kutu) return;
+  try { kutu.value = await cagir(api.waIzinliler()); } catch { }
+
+  el('waIzinliKaydet').onclick = async () => {
+    try {
+      kutu.value = await cagir(api.waIzinlileriYaz(kutu.value));
+      bildir('İzinli numaralar kaydedildi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('waHavaDene').onclick = async () => {
+    const b = el('waHavaDene');
+    b.disabled = true;
+    el('waHavaSonuc').innerHTML =
+      `<div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">Meteoroloji'den alınıyor…</div>`;
+    try {
+      const metin = await cagir(api.havaDenemesi());
+      el('waHavaSonuc').innerHTML = `
+        <div class="rounded-md border border-brand-2/40 bg-bg-200 p-3">
+          <div class="mb-1 text-[11px] text-fg-3">Mesaj olarak böyle gidecek:</div>
+          <pre class="whitespace-pre-wrap font-mono text-[11px] text-fg-2">${kacar(metin)}</pre>
+        </div>`;
+    } catch (e) {
+      el('waHavaSonuc').innerHTML =
+        `<div class="rounded-md border border-danger/40 bg-danger/10 p-3 text-[12px] text-danger">${kacar(e.message)}</div>`;
+    } finally { b.disabled = false; }
+  };
 }
 
 async function waGruplariCiz() {
