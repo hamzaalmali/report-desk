@@ -9,19 +9,37 @@ const path = require('node:path');
 const db = require('../src/main/db/db');
 const { genisTabloOku } = require('../src/main/import/genisTablo');
 const { gecmisiAktar } = require('../src/main/import/gecmisAktar');
-const { gunlukAktar, raporBul } = require('../src/main/import/gunlukAktar');
+const {
+  gunlukAktar, raporBul, raporBulImza, raporBulDosyaAdi,
+} = require('../src/main/import/gunlukAktar');
+const { key } = require('../src/shared/tr');
 const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
 
 const KOK = process.argv[3] || path.join(__dirname, '..', '..');
 
+function excelAra(kok) {
+  const bulunan = [];
+  const tara = (klasor, derinlik) => {
+    let girdiler = [];
+    try { girdiler = fs.readdirSync(klasor, { withFileTypes: true }); } catch { return; }
+    for (const g of girdiler) {
+      const tam = path.join(klasor, g.name);
+      if (g.isDirectory()) {
+        if (derinlik > 0 && g.name !== 'node_modules' && !g.name.startsWith('.')) {
+          tara(tam, derinlik - 1);
+        }
+      } else if (/\.xlsx?$/i.test(g.name) && !g.name.startsWith('~$')) {
+        bulunan.push(tam);
+      }
+    }
+  };
+  tara(kok, 1);
+  return bulunan;
+}
+
 async function genisTabloBul() {
   if (process.argv[2]) return process.argv[2];
-  let adaylar = [];
-  try {
-    adaylar = fs.readdirSync(KOK)
-      .filter((f) => /\.xlsx$/i.test(f) && !f.startsWith('~$'))
-      .map((f) => path.join(KOK, f));
-  } catch { return null; }
+  const adaylar = excelAra(KOK).filter((f) => /\.xlsx$/i.test(f));
   for (const a of adaylar) {
     try {
       const o = await genisTabloOku(a);
@@ -54,9 +72,8 @@ async function main() {
     db.eslesmeler().length === 64, String(db.eslesmeler().length));
 
   if (!KAYNAK) {
-    console.log('\n! Geniş tablo düzeninde .xlsx bulunamadı — Excel testleri atlandı.');
-    return bitir();
-  }
+    console.log('\n! Geniş tablo düzeninde .xlsx bulunamadı — geçmiş/çıktı testleri atlandı.');
+  } else {
   console.log(`\nGeçmiş tabloyu okuma  (${path.basename(KAYNAK)})`);
   const okuma = await genisTabloOku(KAYNAK);
   kontrol('tanınmayan kategori yok', okuma.uyarilar.length === 0, okuma.uyarilar.join(' | '));
@@ -120,10 +137,15 @@ async function main() {
     geri.isletmeler.join('|') === okuma.isletmeler.join('|'),
     geri.isletmeler.slice(0, 5).join(', '));
 
+  }
+
   console.log('\nGünlük rapor aktarımı');
-  const gunlukDosyalar = fs.readdirSync(KOK)
-    .filter((f) => /^\d{2}\.\d{2}\.\d{4}.*\.xlsx?$/i.test(f))
-    .map((f) => path.join(KOK, f));
+  // Bir günün dosyaları tek klasörde durur; adında tarih olan ilk dosyanın
+  // klasöründeki bütün Excel'ler o güne aittir (bazılarının adında tarih olmayabilir).
+  const tarihliIlk = excelAra(KOK).find((f) => /\d{2}\.\d{2}\.\d{4}/.test(path.basename(f)));
+  const gunlukDosyalar = tarihliIlk
+    ? excelAra(path.dirname(tarihliIlk)).filter((f) => path.dirname(f) === path.dirname(tarihliIlk))
+    : [];
   if (!gunlukDosyalar.length) {
     console.log('  ! günlük rapor dosyası bulunamadı, atlandı.');
   } else {
@@ -152,12 +174,29 @@ async function main() {
     }
   }
 
-  console.log('\nSayfa adı tanıma');
+  console.log('\nRapor tanıma');
   kontrol('OSOS sayfaları ek/eksik kelimeyle de tanınır',
     (raporBul('BİNA TİPİ OSOS KONTROL') || {}).kategori === 'BINA_TIPI_OSOS'
-    && (raporBul('OSOS BAĞLANTI İHBAR İNCELEME') || {}).kategori === 'OSOS_BAGLANTI');
+    && (raporBul('OSOS BAĞLANTI İHBAR İNCELEME') || {}).kategori === 'OSOS_BAGLANTI'
+    && (raporBul('BİNA TİPİ') || {}).kategori === 'BINA_TIPI_OSOS');
   kontrol('rapor olmayan sayfalar tanınmaz',
-    ['Rekortmen', '1000 Abone ve Üzeri', '6 Saat ve Üzeri'].every((s) => raporBul(s) === null));
+    ['Rekortmen', 'Rakortman', '1000 Abone ve Üzeri', '6 Saat ve Üzeri']
+      .every((s) => raporBul(s) === null));
+  kontrol('adsız sayfa sütun başlıklarından tanınır',
+    (raporBulImza(['DURUMKODUAÇIKLAMASI']) || {}).kategori === 'DURUM_KODU'
+    && (raporBulImza(['İSTENENBELGELER']) || {}).kategori === 'BILGI_BELGE'
+    && (raporBulImza(['TALEPEDİLEN']) || {}).kategori === 'BILGI_BELGE'
+    && (raporBulImza(['TRAFOADI']) || {}).kategori === 'BINA_TIPI_OSOS'
+    && (raporBulImza(['TSUİSBAĞLANMAORANI']) || {}).kategori === 'OSOS_BAGLANTI');
+  kontrol('imzası olmayan başlık takımı tanınmaz',
+    raporBulImza(['KODNO1', 'KADEME2', 'İL3A']) === null);
+  kontrol('dosya adı son çare olarak tanınır',
+    (raporBulDosyaAdi('11.08.2026 Tarihli İl-İlçe Bilgisi Gelmeyen Kesintiler.xlsx') || {})
+      .kategori === 'IL_ILCE');
+  kontrol('Türkçe harf ayrışık (NFD) yazılsa da eşleşir',
+    key('İLÇE'.normalize('NFD')) === key('İLÇE')
+    && (raporBulDosyaAdi('11.08.2026 BİNA TİPİ OSOS.xlsx'.normalize('NFD')) || {})
+      .kategori === 'BINA_TIPI_OSOS');
 
   console.log('\nElle girilenler aktarımda korunuyor');
   if (gunlukDosyalar.length) {
@@ -168,19 +207,21 @@ async function main() {
       const s = db.gunVerisi(t).satirlar.find((x) => x.kategori_kod === kod && x.isletme_id === id);
       return s ? s[alan] : null;
     };
+    // raporda gerçekten işareti olan bir işletme seç, sabit sıra numarasına güvenme
+    const isaretli = db.gunVerisi(t).satirlar.find((s) => s.kategori_kod === 'BINA_TIPI_OSOS' && s.ariza_var);
     db.hucreGuncelle({ tarih: t, isletme_id: isl[0].id, kategori_id: kat.get('IL_ILCE').id, alan: 'tutanak_gerekli', deger: 1 });
-    db.hucreGuncelle({ tarih: t, isletme_id: isl[3].id, kategori_id: kat.get('BINA_TIPI_OSOS').id, alan: 'donus_saglandi', deger: 1 });
+    db.hucreGuncelle({ tarih: t, isletme_id: isaretli.isletme_id, kategori_id: kat.get('BINA_TIPI_OSOS').id, alan: 'donus_saglandi', deger: 1 });
     db.hucreGuncelle({ tarih: t, isletme_id: isl[0].id, kategori_id: kat.get('SCADA_TM').id, alan: 'tutanak_gerekli', deger: 1 });
 
     await gunlukAktar(gunlukDosyalar);
     kontrol('İL-İLÇE elle işareti yeniden aktarımda silinmiyor',
       oku('IL_ILCE', isl[0].id, 'tutanak_gerekli') === 1);
     kontrol('otomatik kategorinin elle sütunu korunuyor',
-      oku('BINA_TIPI_OSOS', isl[3].id, 'donus_saglandi') === 1);
+      oku('BINA_TIPI_OSOS', isaretli.isletme_id, 'donus_saglandi') === 1);
     kontrol('raporu olmayan kategoriye dokunulmuyor',
       oku('SCADA_TM', isl[0].id, 'tutanak_gerekli') === 1);
     kontrol('otomatik işaret yine de yeniden yazılıyor',
-      oku('BINA_TIPI_OSOS', isl[3].id, 'ariza_var') === 1);
+      oku('BINA_TIPI_OSOS', isaretli.isletme_id, 'ariza_var') === 1);
 
     const osos = gunlukDosyalar.filter((d) => /osos/i.test(d));
     if (osos.length) {
@@ -189,11 +230,41 @@ async function main() {
         kismi.eksikRaporlar.length === 4
         && !kismi.eksikRaporlar.some((e) => e.kod.startsWith('OSOS') || e.kod === 'BINA_TIPI_OSOS'),
         kismi.eksikRaporlar.map((e) => e.kod).join(', '));
-      kontrol('kısmi aktarım seçilmeyen kategorileri silmiyor',
-        oku('DURUM_KODU', isl[3].id, 'ariza_var') !== null);
+      const dk = db.gunVerisi(t).satirlar.find((s) => s.kategori_kod === 'DURUM_KODU' && s.ariza_var);
+      kontrol('kısmi aktarım seçilmeyen kategorileri silmiyor', !!dk);
     }
   } else {
     console.log('  ! günlük rapor dosyası yok, atlandı.');
+  }
+
+  console.log('\nAdında tarih olmayan dosya');
+  if (gunlukDosyalar.length >= 2) {
+    const klasor = path.join(gecici, 'tarihsiz');
+    fs.mkdirSync(klasor, { recursive: true });
+    const kaynak = gunlukDosyalar.find((d) => /\d{2}\.\d{2}\.\d{4}/.test(path.basename(d)));
+    const adsiz = path.join(klasor,
+      path.basename(kaynak).replace(/\d{2}\.\d{2}\.\d{4}\s*/, ''));
+    fs.copyFileSync(kaynak, adsiz);
+    const kalan = gunlukDosyalar.filter((d) => d !== kaynak);
+
+    const adsizMi = (d) => !/\d{2}\.\d{2}\.\d{4}/.test(path.basename(d));
+    const temel = kalan.filter(adsizMi).length + 1;
+
+    const tek = await gunlukAktar([...kalan, adsiz]);
+    kontrol('tek gün varsa tarihsiz dosya o güne ekleniyor',
+      tek.tarihsiz.length === 0 && tek.tarihiVerilen.length === temel && tek.gunler.length === 1,
+      `tarihsiz=${tek.tarihsiz.length} verilen=${tek.tarihiVerilen.length} beklenen=${temel}`);
+
+    const tarihli = kalan.find((d) => !adsizMi(d));
+    const ikinci = path.join(klasor,
+      path.basename(tarihli).replace(/\d{2}\.\d{2}\.\d{4}/, '01.01.2020'));
+    fs.copyFileSync(tarihli, ikinci);
+    const coklu = await gunlukAktar([...kalan, ikinci, adsiz]);
+    kontrol('birden çok gün varsa tarihsiz dosya tahmin edilmiyor',
+      coklu.tarihsiz.length === temel && coklu.tarihiVerilen.length === 0,
+      `tarihsiz=${coklu.tarihsiz.length} verilen=${coklu.tarihiVerilen.length} beklenen=${temel}`);
+  } else {
+    console.log('  ! yeterli günlük dosya yok, atlandı.');
   }
 
   console.log('\nÇoklu gün aktarımı');
@@ -209,7 +280,9 @@ async function main() {
     const toplu = await gunlukAktar([...gunlukDosyalar, ...kopyalar]);
     kontrol('iki ayrı gün ayrı ayrı yazıldı', toplu.gunler.length === 2,
       toplu.gunler.map((g) => g.tarih).join(', '));
-    const m = path.basename(gunlukDosyalar[0]).match(/(\d{2})\.(\d{2})\.(\d{4})/);
+    const m = gunlukDosyalar
+      .map((d) => path.basename(d).match(/(\d{2})\.(\d{2})\.(\d{4})/))
+      .find(Boolean);
     const asilTarih = `${m[3]}-${m[2]}-${m[1]}`;
     kontrol('tarihler dosya adlarından doğru okundu',
       toplu.gunler.map((g) => g.tarih).sort().join(',') === `2020-01-01,${asilTarih}`,
@@ -217,7 +290,12 @@ async function main() {
     kontrol('her gün kendi kayıtlarını aldı',
       toplu.gunler.every((g) => g.isaretToplam > 0),
       toplu.gunler.map((g) => `${g.tarih}:${g.isaretToplam}`).join(' '));
-    kontrol('tarihsiz dosya yok', toplu.tarihsiz.length === 0);
+    // iki gün varsa adı tarihsiz dosyalar tahmin edilmez, oldukları gibi bildirilir
+    const adsizAdet = [...gunlukDosyalar, ...kopyalar]
+      .filter((d) => !/\d{2}\.\d{2}\.\d{4}/.test(path.basename(d))).length;
+    kontrol('adı tarihsiz dosyalar eksiksiz bildiriliyor',
+      toplu.tarihsiz.length === adsizAdet,
+      `${toplu.tarihsiz.length} / ${adsizAdet}`);
   } else {
     console.log('  ! günlük rapor dosyası yok, atlandı.');
   }

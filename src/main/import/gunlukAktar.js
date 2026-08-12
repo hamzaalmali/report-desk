@@ -11,26 +11,30 @@ const { hucreMetni, isoTarih } = require('./genisTablo');
 
 const RAPORLAR = [
   {
-    sayfa: 'ARIZADETAY', kategori: 'ARIZA_DETAY', tip: 'standart',
+    sayfa: 'ARIZADETAY', dosya: 'ARIZADETAY', kategori: 'ARIZA_DETAY', tip: 'standart',
     ilce: 'İLÇE', il: 'İL', mahalle: '', koy: '', mudurluk: '',
   },
   {
-    sayfa: 'AYS_IhbarTakipRaporu', kategori: 'DURUM_KODU', tip: 'standart',
+    sayfa: 'AYS_IhbarTakipRaporu', dosya: 'DURUMKODU', imza: ['DURUMKODUAÇIKLAMASI'],
+    kategori: 'DURUM_KODU', tip: 'standart',
     ilce: 'İLÇE ADI', il: 'İL ADI', mahalle: 'MAHALLE ADI', koy: 'KÖY ADI', mudurluk: 'MÜDÜRLÜK',
   },
   {
-    sayfa: 'BİNATİPİOSOS', kategori: 'BINA_TIPI_OSOS', tip: 'standart',
+    sayfa: 'BİNATİPİOSOS', dosya: 'BİNATİPİ', imza: ['TRAFOADI'],
+    kategori: 'BINA_TIPI_OSOS', tip: 'standart',
     ilce: 'İLÇE ADI', il: 'İL ADI', mahalle: 'MAHALLE ADI', koy: 'KÖY ADI', mudurluk: 'MÜDÜRLÜK',
   },
   {
-    sayfa: 'OSOSBAĞLANTIİHBARİNCELEMESİ', kategori: 'OSOS_BAGLANTI', tip: 'standart',
+    sayfa: 'OSOSBAĞLANTIİHBARİNCELEMESİ', dosya: 'OSOSBAĞLANTI', imza: ['TSUİSBAĞLANMAORANI'],
+    kategori: 'OSOS_BAGLANTI', tip: 'standart',
     ilce: 'İLÇE', il: 'İL', mahalle: '', koy: '', mudurluk: 'MÜDÜRLÜK',
   },
   {
-    sayfaOnEk: 'TABLO1', kategori: 'BILGI_BELGE', tip: 'standart',
+    sayfaOnEk: 'TABLO1', dosya: 'BİLGİBELGE', imza: ['İSTENENBELGELER', 'TALEPEDİLEN'],
+    kategori: 'BILGI_BELGE', tip: 'standart',
     ilce: 'İLÇE', il: 'İL', mahalle: '', koy: '', mudurluk: '',
   },
-  { sayfa: 'İLİLÇE', kategori: 'IL_ILCE', tip: 'ililce' },
+  { sayfa: 'İLİLÇE', dosya: 'İLİLÇE', kategori: 'IL_ILCE', tip: 'ililce' },
 ];
 
 function raporBul(sayfaAdi) {
@@ -47,6 +51,42 @@ function raporBul(sayfaAdi) {
     if (k.length >= 6 && a.startsWith(k)) return r;
   }
   return null;
+}
+
+function raporBulImza(basliklar) {
+  const set = new Set(basliklar.filter(Boolean));
+  for (const r of RAPORLAR) {
+    if (r.imza && r.imza.some((i) => set.has(i))) return r;
+  }
+  return null;
+}
+
+function raporBulDosyaAdi(dosyaYolu) {
+  const k = key(path.parse(dosyaYolu).name);
+  if (!k) return null;
+  for (const r of RAPORLAR) {
+    if (r.dosya && k.includes(key(r.dosya))) return r;
+  }
+  return null;
+}
+
+function sayfalariEslestir(wb, dosya) {
+  const eslesen = new Map();
+  const bosta = [];
+
+  for (const ws of wb.worksheets) {
+    const r = raporBul(ws.name) || raporBulImza(satirlariOku(ws).basliklar);
+    if (r) eslesen.set(ws, r);
+    else bosta.push(ws);
+  }
+
+  if (bosta.length === 1) {
+    const r = raporBulDosyaAdi(dosya);
+    const zaten = [...eslesen.values()].some((x) => x.kategori === (r || {}).kategori);
+    if (r && !zaten) eslesen.set(bosta.pop(), r);
+  }
+
+  return { eslesen, bosta };
 }
 
 function tarihiCikar(dosyaYolu) {
@@ -235,12 +275,11 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       continue;
     }
 
-    let taninan = false;
-    const atlanan = [];
-    for (const ws of wb.worksheets) {
-      const rapor = raporBul(ws.name);
-      if (!rapor) { atlanan.push(ws.name); continue; }
-      taninan = true;
+    const { eslesen, bosta } = sayfalariEslestir(wb, dosya);
+    const taninan = eslesen.size > 0;
+    const atlanan = bosta.map((ws) => ws.name);
+
+    for (const [ws, rapor] of eslesen) {
 
       if (rapor.tip === 'ililce') {
         oneriler = ilIlceTara(ws, tablo, gunluk);
@@ -353,14 +392,14 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
 async function gunlukAktar(dosyalar, secenekler = {}) {
   if (secenekler.tarih) {
     const g = await birGunAktar(dosyalar, secenekler.tarih, secenekler);
-    return { gunler: [g], tarihsiz: [], cokluMu: false };
+    return { gunler: [g], tarihsiz: [], tarihiVerilen: [], cokluMu: false };
   }
 
   const gruplar = new Map();
-  const tarihsiz = [];
+  let tarihsiz = [];
   for (const d of dosyalar) {
     const t = tarihiCikar(d);
-    if (!t) { tarihsiz.push(path.basename(d)); continue; }
+    if (!t) { tarihsiz.push(d); continue; }
     if (!gruplar.has(t)) gruplar.set(t, []);
     gruplar.get(t).push(d);
   }
@@ -369,6 +408,16 @@ async function gunlukAktar(dosyalar, secenekler = {}) {
     throw new Error(
       'Hiçbir dosya adında GG.AA.YYYY bulunamadı — tarihi elle seçip tekrar deneyin.'
     );
+  }
+
+  const tarihiVerilen = [];
+  if (gruplar.size === 1 && tarihsiz.length) {
+    const t = [...gruplar.keys()][0];
+    for (const d of tarihsiz) {
+      gruplar.get(t).push(d);
+      tarihiVerilen.push(path.basename(d));
+    }
+    tarihsiz = [];
   }
 
   const gunler = [];
@@ -386,9 +435,15 @@ async function gunlukAktar(dosyalar, secenekler = {}) {
       });
     }
   }
-  return { gunler, tarihsiz, cokluMu: gruplar.size > 1 };
+  return {
+    gunler,
+    tarihsiz: tarihsiz.map((d) => path.basename(d)),
+    tarihiVerilen,
+    cokluMu: gruplar.size > 1,
+  };
 }
 
 module.exports = {
-  gunlukAktar, birGunAktar, tarihiCikar, raporBul, baslikSutunu, isletmeyeEslestir,
+  gunlukAktar, birGunAktar, tarihiCikar, raporBul, raporBulImza, raporBulDosyaAdi,
+  baslikSutunu, isletmeyeEslestir,
 };

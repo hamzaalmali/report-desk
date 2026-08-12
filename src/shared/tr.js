@@ -4,6 +4,7 @@
 
 function trUpper(s) {
   return String(s == null ? '' : s)
+    .normalize('NFC')
     .replace(/i/g, 'İ')
     .replace(/ı/g, 'I')
     .replace(/ş/g, 'Ş')

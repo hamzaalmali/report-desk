@@ -675,20 +675,23 @@ async function sayfaAktar() {
         <div class="card-head"><div class="font-medium">Günlük rapor dosyaları</div></div>
         <div class="space-y-4 p-5">
           <p class="text-[12.5px] text-fg-2">
-            O güne ait rapor dosyalarını seçin (hepsini birden seçebilirsiniz). Dosya adları önemli
-            değil — sayfa adlarından tanınır. Tarih dosya adındaki <b>GG.AA.YYYY</b>'den okunur.
+            O güne ait rapor dosyalarını seçin (hepsini birden seçebilirsiniz). Raporlar önce
+            sayfa adından, tanınmazsa sütun başlıklarından, o da olmazsa dosya adından
+            anlaşılır. Tarih dosya adındaki <b>GG.AA.YYYY</b>'den okunur; tek gün seçtiyseniz
+            adında tarih olmayan dosya da aynı güne yazılır.
           </p>
 
           <div class="rounded-md border border-line bg-bg-200 p-3 text-[11.5px] text-fg-3">
-            <div class="mb-1.5 font-medium text-fg-2">Tanınan raporlar</div>
+            <div class="mb-1.5 font-medium text-fg-2">Aranan raporlar</div>
             <div class="grid grid-cols-2 gap-x-6 gap-y-1">
-              <span>Arıza Detay → <b class="text-fg-2">ARIZA DETAY</b></span>
-              <span>AYS_IhbarTakipRaporu → <b class="text-fg-2">DURUM KODU</b></span>
-              <span>BİNA TİPİ OSOS → <b class="text-fg-2">BİNA TİPİ OSOS</b></span>
-              <span>OSOS BAĞLANTI İHBAR İNC. → <b class="text-fg-2">OSOS BAĞLANTI</b></span>
-              <span>TABLO-1 … → <b class="text-fg-2">BİLGİ BELGE</b></span>
-              <span>İL-İLÇE → <b class="text-fg-2">öneri listesi (elle)</b></span>
+              <span>ARIZA DETAY</span>
+              <span>DURUM KODU</span>
+              <span>BİNA TİPİ OSOS</span>
+              <span>OSOS BAĞLANTI İHBAR İNCELEMESİ</span>
+              <span>BİLGİ BELGE</span>
+              <span>İL-İLÇE <b class="text-fg-2">(öneri listesi, işaretleme elle)</b></span>
             </div>
+            <div class="mt-1.5">Biri seçilmemişse aktarım sonunda uyarı verir.</div>
           </div>
 
           <div class="space-y-2">
@@ -763,6 +766,13 @@ function aktarSonucuCiz(toplu) {
                 data-gunegit="${g.tarih}">${tarihYaz(g.tarih)} · ${g.isaretToplam}</button>`).join('')}
           </div>
         </div>
+      </div>` : ''}
+    ${(toplu.tarihiVerilen || []).length ? `
+      <div class="card mb-3 border-brand-2/40 p-3 text-[12px]">
+        ${svg('ok', 'inline size-3.5 -mt-0.5 text-brand')} Adında tarih olmayan
+        ${toplu.tarihiVerilen.length} dosya, diğer dosyaların günü olan
+        <b>${tarihYaz(toplu.gunler[0].tarih)}</b> gününe eklendi:
+        <span class="text-fg-3">${toplu.tarihiVerilen.map(kacar).join(', ')}</span>
       </div>` : ''}
     ${toplu.tarihsiz.length ? `
       <div class="card mb-3 border-warn/40 p-3 text-[12px]">
