@@ -11,6 +11,7 @@ const { gunlukAktar } = require('./import/gunlukAktar');
 const { aylikDisaAktar, gunlukDisaAktar } = require('./export/excelDisaAktar');
 const { vardiyaIceAktar } = require('./import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('./export/vardiyaDisaAktar');
+const wa = require('./whatsapp/wa');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
@@ -258,6 +259,14 @@ app.whenReady().then(() => {
   } catch (e) {
     hataYaz('güncelleme kurulumu', e);
   }
+  try {
+    wa.kur(path.join(app.getPath('userData'), 'whatsapp-oturum'), (d) => {
+      if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
+    });
+    if (wa.oturumVarMi()) wa.baslat().catch((e) => hataYaz('whatsapp başlangıç', e));
+  } catch (e) {
+    hataYaz('whatsapp kurulumu', e);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) pencereOlustur();
@@ -498,5 +507,10 @@ kanal('vardiyaExcel', async (ay) => {
   await vardiyaDisaAktar(ay, r.filePath);
   return r.filePath;
 });
+
+kanal('waDurum', () => wa.durumAl(), true);
+kanal('waBaslat', () => wa.baslat(), true);
+kanal('waDurdur', () => wa.durdur(), true);
+kanal('waCikis', () => wa.cikisYap(), true);
 
 kanal('guncellemeKontrol', () => guncellemeKontrol());

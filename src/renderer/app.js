@@ -19,6 +19,7 @@ const IKON = {
   kapat: '<path d="M18 6 6 18M6 6l12 12"/>',
   ok: '<path d="M20 6 9 17l-5-5"/>',
   uyari: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  wa: '<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.4 8.5 8.5 0 0 1-4-1L3 20l1.1-5.4a8.4 8.4 0 0 1-.9-3.8 8.4 8.4 0 0 1 8.5-8.3 8.4 8.4 0 0 1 8.3 8.4z"/><path d="M8.5 8.2c.2-.4.4-.4.6-.4h.5c.2 0 .4 0 .6.5l.7 1.7c0 .2 0 .4-.1.5l-.4.5c-.1.2-.3.3-.1.6.5.9 1.5 1.8 2.5 2.2.3.1.4 0 .6-.1l.5-.6c.2-.2.3-.1.5-.1l1.6.8c.2.1.4.2.4.3v.9c-.1.4-.7.9-1.2 1-.5 0-1.1.2-3.4-.8-2.4-1-3.9-3.5-4-3.7-.1-.2-1-1.3-1-2.5s.6-1.8.8-2z"/>',
   vardiya: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   sol: '<path d="m15 18-6-6 6-6"/>',
   sag: '<path d="m9 18 6-6-6-6"/>',
@@ -39,6 +40,7 @@ const SAYFALAR = [
   { id: 'eslesme',  ad: 'Eşleştirme',      alt: 'Rapor metni → işletme kuralları',      ikon: 'eslesme' },
   { id: 'oneri',    ad: 'Öneriler', alt: 'Elle işaretlenecek kayıtlar',    ikon: 'oneri' },
   { id: 'vardiya',  ad: 'Vardiya',  alt: 'Aylık vardiya çizelgesi',        ikon: 'vardiya' },
+  { id: 'whatsapp', ad: 'WhatsApp', alt: 'Oturum ve bağlantı durumu',      ikon: 'wa' },
 ];
 
 const AY_ADI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -236,7 +238,7 @@ async function git(id) {
     await ({
       genel: sayfaGenel, gunluk: sayfaGunluk, ay: sayfaAy, aktar: sayfaAktar,
       gecmis: sayfaGecmis, eslesme: sayfaEslesme, oneri: sayfaOneri,
-      vardiya: sayfaVardiya, ayarlar: sayfaAyarlar,
+      vardiya: sayfaVardiya, whatsapp: sayfaWhatsapp, ayarlar: sayfaAyarlar,
     }[id] || sayfaGenel)();
   } catch (e) {
     el('icerik').innerHTML = `<div class="card p-6 text-danger">${kacar(e.message)}</div>`;
@@ -1419,6 +1421,114 @@ async function vEkipEkle() {
     await cagir(api.vardiyaEkipEkle(ad.trim(), v.trim() || 'A,B'));
     sayfaVardiya();
   } catch (e) { bildir(kacar(e.message), 'hata'); }
+}
+
+const WA_ASAMA = {
+  kapali:     { ad: 'Bağlı değil',  renk: 'text-fg-3',   ikon: 'uyari' },
+  baglaniyor: { ad: 'Bağlanıyor…',  renk: 'text-warn',   ikon: 'yenile' },
+  qr:         { ad: 'QR bekleniyor', renk: 'text-warn',  ikon: 'wa' },
+  bagli:      { ad: 'Bağlı',        renk: 'text-brand',  ikon: 'ok' },
+  hata:       { ad: 'Hata',         renk: 'text-danger', ikon: 'uyari' },
+};
+
+async function sayfaWhatsapp() {
+  const d = await cagir(api.waDurum());
+  D.waDurum = d;
+  waCiz(d);
+  if (!D.waBagli) {
+    D.waBagli = true;
+    api.waDinle((yeni) => {
+      D.waDurum = yeni;
+      if (D.sayfa === 'whatsapp') waCiz(yeni);
+    });
+  }
+}
+
+function waCiz(d) {
+  const a = WA_ASAMA[d.asama] || WA_ASAMA.kapali;
+  el('navAraclar').innerHTML = `
+    <span class="chip ${a.renk} border-line-2">${svg(a.ikon, 'size-3.5')} ${a.ad}</span>`;
+
+  const govde = d.asama === 'bagli'
+    ? `
+      <div class="flex flex-col items-center gap-3 py-8">
+        <span class="text-brand">${svg('ok', 'size-10')}</span>
+        <div class="text-[15px] font-medium">WhatsApp bağlı</div>
+        <div class="text-[12.5px] text-fg-2">
+          ${d.numara ? `+${kacar(d.numara)}` : ''} ${d.ad ? `· ${kacar(d.ad)}` : ''}
+        </div>
+        <div class="text-[11.5px] text-fg-3">
+          Oturum bu bilgisayarda saklanıyor; programı kapatıp açsanız da bağlı kalır.
+        </div>
+      </div>`
+    : d.asama === 'qr' && d.qr
+      ? `
+      <div class="flex flex-col items-center gap-3 py-6">
+        <img src="${d.qr}" alt="QR" class="rounded-lg bg-white p-2" style="width:280px;height:280px" />
+        <div class="text-[12.5px] text-fg-2">Telefonda WhatsApp → <b>Bağlı cihazlar</b> → <b>Cihaz bağla</b></div>
+        <div class="text-[11.5px] text-fg-3">Kod birkaç dakikada bir yenilenir, beklemeniz yeterli.</div>
+      </div>`
+      : `
+      <div class="flex flex-col items-center gap-3 py-10 text-center">
+        <span class="${a.renk}">${svg(a.ikon, 'size-9')}</span>
+        <div class="text-[14px] font-medium">${a.ad}</div>
+        <div class="text-[12px] text-fg-3">
+          ${d.asama === 'baglaniyor'
+            ? 'Sunucuya bağlanılıyor…'
+            : d.oturumVar
+              ? 'Kayıtlı bir oturum var. “Bağlan” deyin.'
+              : '“Bağlan” deyince QR kodu çıkacak.'}
+        </div>
+      </div>`;
+
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 overflow-auto">
+      <div class="card">
+        <div class="card-head">
+          <div class="font-medium">WhatsApp oturumu</div>
+          <div class="flex gap-2">
+            ${d.asama === 'bagli' || d.asama === 'qr' || d.asama === 'baglaniyor'
+              ? `<button class="btn btn-sm" id="waDurdur">Bağlantıyı kes</button>` : ''}
+            ${d.asama !== 'bagli'
+              ? `<button class="btn btn-sm btn-brand" id="waBaslat">${svg('yenile', 'size-3.5')} Bağlan</button>` : ''}
+            ${d.oturumVar
+              ? `<button class="btn btn-sm" id="waCikis">${svg('sil', 'size-3.5')} Oturumu sil</button>` : ''}
+          </div>
+        </div>
+        <div class="p-5">
+          ${govde}
+          ${d.hata ? `
+            <div class="mt-2 rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
+              ${svg('uyari', 'inline size-3.5 -mt-0.5')} ${kacar(d.hata)}
+            </div>` : ''}
+        </div>
+      </div>
+
+      <div class="card mt-4">
+        <div class="card-head"><div class="font-medium">Bilinmesi gerekenler</div></div>
+        <div class="space-y-2 p-5 text-[12px] text-fg-2">
+          <div>· Oturum dosyaları: <span class="font-mono text-[11px] text-fg-3">${kacar(d.yol || '')}</span></div>
+          <div>· “Oturumu sil” hem buradaki kaydı siler hem de telefondaki bağlı cihaz listesinden düşürür.</div>
+          <div>· Bu bağlantı WhatsApp'ın resmî iş API'si değil, telefonunuza bağlı cihaz olarak çalışır.
+                 Toplu/otomatik mesajda aşırıya kaçmak numaranın kapatılmasına yol açabilir.</div>
+        </div>
+      </div>
+    </div>`;
+
+  const bagla = (id, fn) => { const b = el(id); if (b) b.onclick = fn; };
+  bagla('waBaslat', async () => {
+    el('waBaslat').disabled = true;
+    try { waCiz(await cagir(api.waBaslat())); }
+    catch (e) { bildir(kacar(e.message), 'hata'); waCiz(D.waDurum); }
+  });
+  bagla('waDurdur', async () => { waCiz(await cagir(api.waDurdur())); });
+  bagla('waCikis', async () => {
+    if (!confirm('Kayıtlı WhatsApp oturumu silinecek. Yeniden QR okutmanız gerekir. Emin misiniz?')) return;
+    try {
+      waCiz(await cagir(api.waCikis()));
+      bildir('Oturum silindi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  });
 }
 
 async function sayfaAyarlar() {

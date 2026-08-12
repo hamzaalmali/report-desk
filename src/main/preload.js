@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('api', {
   vardiyaAktar: (dosyalar, s) => cagir('vardiyaAktar', dosyalar, s),
   vardiyaExcel: (ay) => cagir('vardiyaExcel', ay),
 
+  waDurum: () => cagir('waDurum'),
+  waBaslat: () => cagir('waBaslat'),
+  waDurdur: () => cagir('waDurdur'),
+  waCikis: () => cagir('waCikis'),
+  waDinle: (fn) => { ipcRenderer.on('waDurum', (_o, veri) => fn(veri)); },
+
   surum: () => cagir('surum'),
   vtDurum: () => cagir('vtDurum'),
   vtOnar: () => cagir('vtOnar'),
