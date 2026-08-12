@@ -8,7 +8,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const db = require('./db/db');
 const { gecmisiAktar } = require('./import/gecmisAktar');
 const { gunlukAktar } = require('./import/gunlukAktar');
-const { aylikDisaAktar } = require('./export/excelDisaAktar');
+const { aylikDisaAktar, gunlukDisaAktar } = require('./export/excelDisaAktar');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
@@ -360,6 +360,18 @@ kanal('excelDisaAktar', async (ay) => {
   });
   if (r.canceled) return null;
   await aylikDisaAktar(ay, r.filePath);
+  return r.filePath;
+});
+
+kanal('gunExcelDisaAktar', async (tarih) => {
+  const [y, a, g] = tarih.split('-');
+  const r = await dialog.showSaveDialog(pencere, {
+    title: 'Gün tablosunu kaydet',
+    defaultPath: `Tablo-${g}.${a}.${y}.xlsx`,
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+  });
+  if (r.canceled) return null;
+  await gunlukDisaAktar(tarih, r.filePath);
   return r.filePath;
 });
 

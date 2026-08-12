@@ -14,9 +14,11 @@
     "release": "npm run css && electron-builder --win --publish always"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "electron-updater": "^6.6.2",
     "exceljs": "^4.4.0",
-    "node-sqlite3-wasm": "^0.8.60"
+    "node-sqlite3-wasm": "^0.8.60",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

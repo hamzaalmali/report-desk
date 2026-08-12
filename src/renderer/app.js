@@ -472,6 +472,7 @@ async function gunIzgarasiCiz() {
       <div class="flex items-center gap-3 text-[11px] text-fg-3">
         <span class="flex items-center gap-1.5"><i class="inline-block size-3 rounded-sm bg-brand-dim"></i> İşaretli</span>
         <span class="flex items-center gap-1.5"><i class="inline-block size-3 rounded-sm" style="background:rgba(240,82,82,.25)"></i> Bekliyor</span>
+        <button class="btn btn-sm" id="gunExcel">${svg('excel', 'size-3.5')} Excel'e aktar</button>
         <button class="btn btn-sm" id="gunSil">${svg('sil', 'size-3.5')} Günü sil</button>
       </div>
     </div>
@@ -487,6 +488,15 @@ async function gunIzgarasiCiz() {
         <tbody>${satirlar}</tbody>
       </table>
     </div>`;
+
+  el('gunExcel').onclick = async () => {
+    try {
+      const yol = await cagir(api.gunExcelDisaAktar(D.tarih));
+      if (!yol) return;
+      bildir(`<b>${tarihYaz(D.tarih)} tablosu kaydedildi.</b><br>${kacar(yol)}`, 'basari');
+      api.klasorAc(yol);
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
 
   el('gunSil').onclick = async () => {
     if (!confirm(`${tarihYaz(D.tarih)} gününe ait tüm kayıtlar silinecek. Emin misiniz?`)) return;

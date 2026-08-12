@@ -37,6 +37,7 @@ contextBridge.exposeInMainWorld('api', {
   gecmisAktar: (dosyalar, secenekler) => cagir('gecmisAktar', dosyalar, secenekler),
   gunlukAktar: (dosyalar, secenekler) => cagir('gunlukAktar', dosyalar, secenekler),
   excelDisaAktar: (ay) => cagir('excelDisaAktar', ay),
+  gunExcelDisaAktar: (tarih) => cagir('gunExcelDisaAktar', tarih),
   klasorAc: (dosya) => cagir('klasorAc', dosya),
 
   surum: () => cagir('surum'),

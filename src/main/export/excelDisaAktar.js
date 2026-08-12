@@ -33,7 +33,12 @@ function dolgu(argb) {
   return { type: 'pattern', pattern: 'solid', fgColor: { argb }, bgColor: { indexed: 64 } };
 }
 
-async function aylikDisaAktar(ay, yol) {
+function gunYaz(tarih) {
+  const [y, a, g] = tarih.split('-');
+  return `${g}.${a}.${y}`;
+}
+
+async function tabloDisaAktar(ay, yol, tekGun) {
   const [yil, aySayi] = ay.split('-').map(Number);
   const isletmeler = db.isletmeler();
   const kategoriler = db.kategoriler();
@@ -67,13 +72,19 @@ async function aylikDisaAktar(ay, yol) {
     }
   }
 
-  const tumGunler = [...gunKategori.keys()].sort();
+  const tumGunler = [...gunKategori.keys()].sort()
+    .filter((t) => !tekGun || t === tekGun);
+
+  if (tekGun && !tumGunler.length) {
+    throw new Error(`${gunYaz(tekGun)} için kayıt yok.`);
+  }
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Rapor Masası';
-  const ws = wb.addWorksheet(`${AY_ADLARI[aySayi - 1]} ${yil}`, {
-    views: [{ state: 'frozen', xSplit: 1, ySplit: 3 }],
-  });
+  const ws = wb.addWorksheet(
+    tekGun ? gunYaz(tekGun) : `${AY_ADLARI[aySayi - 1]} ${yil}`,
+    { views: [{ state: 'frozen', xSplit: 1, ySplit: 3 }] }
+  );
 
   ws.getColumn(1).width = 16;
   for (const r of [1, 2, 3]) {
@@ -158,4 +169,12 @@ async function aylikDisaAktar(ay, yol) {
   return { yol, gun: tumGunler.length, sutun: sutun - 1 };
 }
 
-module.exports = { aylikDisaAktar, AY_ADLARI };
+function aylikDisaAktar(ay, yol) {
+  return tabloDisaAktar(ay, yol, null);
+}
+
+function gunlukDisaAktar(tarih, yol) {
+  return tabloDisaAktar(tarih.slice(0, 7), yol, tarih);
+}
+
+module.exports = { aylikDisaAktar, gunlukDisaAktar, AY_ADLARI };
