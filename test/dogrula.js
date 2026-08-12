@@ -14,6 +14,8 @@ const {
 } = require('../src/main/import/gunlukAktar');
 const { key } = require('../src/shared/tr');
 const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
+const { vardiyaIceAktar } = require('../src/main/import/vardiyaAktar');
+const { vardiyaDisaAktar } = require('../src/main/export/vardiyaDisaAktar');
 
 const KOK = process.argv[3] || path.join(__dirname, '..', '..');
 
@@ -354,6 +356,51 @@ async function main() {
       `tarihsiz=${coklu.tarihsiz.length} verilen=${coklu.tarihiVerilen.length} beklenen=${temel}`);
   } else {
     console.log('  ! yeterli günlük dosya yok, atlandı.');
+  }
+
+  console.log('\nVardiya');
+  const vardiyaDosyalari = excelAra(KOK).filter((f) => /vardiya/i.test(f.normalize('NFC')));
+  if (!vardiyaDosyalari.length) {
+    console.log('  ! vardiya Excel dosyası bulunamadı, atlandı.');
+  } else {
+    const v = await vardiyaIceAktar(vardiyaDosyalari);
+    kontrol('vardiya dosyası okundu',
+      v.aylar.length > 0 && v.kayit > 0 && v.uyarilar.length === 0,
+      `${v.aylar.length} ay, ${v.kayit} kayıt ${v.uyarilar.join(' | ')}`);
+    kontrol('ekipler ve personel kuruldu',
+      db.vardiyaEkipler().length > 0 && db.vardiyaPersoneller(null).length > 0,
+      `${db.vardiyaEkipler().length} ekip, ${db.vardiyaPersoneller(null).length} personel`);
+    kontrol('her ekibin vardiya listesi kaynaktan öğrenildi',
+      db.vardiyaEkipler().every((e) => /^[ABC](,[ABC])*$/.test(e.vardiyalar)),
+      db.vardiyaEkipler().map((e) => `${e.ad}=${e.vardiyalar}`).join(' '));
+
+    const ay = v.aylar[v.aylar.length - 1];
+    const once = db.vardiyaAyVerisi(ay);
+    const yol = path.join(gecici, 'vardiya.xlsx');
+    const cikti = await vardiyaDisaAktar(ay, yol);
+    kontrol('vardiya Excel yazıldı', cikti.gun >= 28 && cikti.ekip > 0, JSON.stringify(cikti));
+
+    // gidiş-dönüş: yazılan dosya tekrar okununca aynı çizelge çıkmalı
+    const ikinci = fs.mkdtempSync(path.join(os.tmpdir(), 'vardiya-rt-'));
+    const anaVt = db.yol();
+    db.ac(path.join(ikinci, 'v.sqlite'));
+    await vardiyaIceAktar([yol]);
+    const sonra = db.vardiyaAyVerisi(ay);
+    const cizelge = (veri) => {
+      const ad = new Map(veri.personeller.map((p) => [p.id, p.ad]));
+      return new Set(veri.kayitlar.map((k) => `${ad.get(k.personel_id)}|${k.gun}|${k.kod}`));
+    };
+    const A = cizelge(once), B = cizelge(sonra);
+    let fark = 0;
+    for (const x of A) if (!B.has(x)) fark++;
+    for (const x of B) if (!A.has(x)) fark++;
+    kontrol(`${ay} vardiya çıktısı kaynakla birebir`, fark === 0, `${fark} fark (${A.size}/${B.size})`);
+
+    const ekip = db.vardiyaEkipler()[0];
+    const say = db.vardiyaAyVerisi(ay).kayitlar
+      .filter((k) => k.ekip_id === ekip.id && k.gun === 1 && k.kod === 'A').length;
+    kontrol('günlük vardiya sayımı hesaplanabiliyor', Number.isInteger(say), String(say));
+    db.ac(anaVt);
   }
 
   console.log('\nÇoklu gün aktarımı');

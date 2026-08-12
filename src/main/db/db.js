@@ -398,6 +398,115 @@ function oneriler(tarih) {
     : db.all('SELECT * FROM oneri ORDER BY tarih DESC, id LIMIT 500');
 }
 
+function vardiyaEkipler() {
+  return db.all('SELECT id, ad, vardiyalar, sira FROM vardiya_ekip ORDER BY sira, id');
+}
+
+function vardiyaEkipEkle(ad, vardiyalar = 'A,B') {
+  ad = String(ad || '').trim();
+  if (!ad) throw new Error('Ekip adı boş olamaz.');
+  const enBuyuk = db.get('SELECT COALESCE(MAX(sira), 0) AS s FROM vardiya_ekip').s;
+  db.run('INSERT OR IGNORE INTO vardiya_ekip (ad, vardiyalar, sira) VALUES (:a, :v, :s)',
+    { ':a': ad, ':v': vardiyalar, ':s': enBuyuk + 1 });
+  return db.get('SELECT * FROM vardiya_ekip WHERE ad = :a', { ':a': ad });
+}
+
+function vardiyaEkipGuncelle(id, { ad, vardiyalar }) {
+  if (ad != null) {
+    db.run('UPDATE vardiya_ekip SET ad = :a WHERE id = :id', { ':a': String(ad).trim(), ':id': id });
+  }
+  if (vardiyalar != null) {
+    db.run('UPDATE vardiya_ekip SET vardiyalar = :v WHERE id = :id',
+      { ':v': String(vardiyalar), ':id': id });
+  }
+  return vardiyaEkipler();
+}
+
+function vardiyaEkipSil(id) {
+  db.run('DELETE FROM vardiya_ekip WHERE id = :id', { ':id': id });
+}
+
+function vardiyaPersoneller(ekipId) {
+  return ekipId
+    ? db.all('SELECT id, ekip_id, ad, sira FROM vardiya_personel WHERE ekip_id = :e ORDER BY sira, id',
+      { ':e': ekipId })
+    : db.all('SELECT id, ekip_id, ad, sira FROM vardiya_personel ORDER BY ekip_id, sira, id');
+}
+
+function vardiyaPersonelEkle(ekipId, ad) {
+  ad = String(ad || '').trim();
+  if (!ad) throw new Error('Personel adı boş olamaz.');
+  const enBuyuk = db.get(
+    'SELECT COALESCE(MAX(sira), 0) AS s FROM vardiya_personel WHERE ekip_id = :e', { ':e': ekipId }
+  ).s;
+  db.run('INSERT OR IGNORE INTO vardiya_personel (ekip_id, ad, sira) VALUES (:e, :a, :s)',
+    { ':e': ekipId, ':a': ad, ':s': enBuyuk + 1 });
+  return db.get('SELECT * FROM vardiya_personel WHERE ekip_id = :e AND ad = :a',
+    { ':e': ekipId, ':a': ad });
+}
+
+function vardiyaPersonelSil(id) {
+  db.run('DELETE FROM vardiya_personel WHERE id = :id', { ':id': id });
+}
+
+function vardiyaPersonelTasi(id, yon) {
+  const p = db.get('SELECT ekip_id FROM vardiya_personel WHERE id = :id', { ':id': id });
+  if (!p) return [];
+  const liste = vardiyaPersoneller(p.ekip_id);
+  const ix = liste.findIndex((x) => x.id === id);
+  const hedef = ix + (yon < 0 ? -1 : 1);
+  if (ix < 0 || hedef < 0 || hedef >= liste.length) return liste;
+  const idler = liste.map((x) => x.id);
+  idler.splice(hedef, 0, idler.splice(ix, 1)[0]);
+  islem(() => {
+    const st = db.prepare('UPDATE vardiya_personel SET sira = :s WHERE id = :id');
+    idler.forEach((pid, i) => st.run({ ':s': i + 1, ':id': pid }));
+    st.finalize();
+  });
+  return vardiyaPersoneller(p.ekip_id);
+}
+
+function vardiyaAyVerisi(ay) {
+  const kayitlar = db.all(
+    `SELECT k.ay, k.personel_id, k.gun, k.kod, p.ekip_id
+     FROM vardiya_kayit k JOIN vardiya_personel p ON p.id = k.personel_id
+     WHERE k.ay = :ay`,
+    { ':ay': ay }
+  );
+  return { ay, ekipler: vardiyaEkipler(), personeller: vardiyaPersoneller(null), kayitlar };
+}
+
+function vardiyaAylar() {
+  return db.all('SELECT ay, COUNT(*) AS kayit FROM vardiya_kayit GROUP BY ay ORDER BY ay DESC');
+}
+
+function vardiyaYaz(ay, personelId, gun, kod) {
+  const temiz = String(kod == null ? '' : kod).trim();
+  if (!temiz) {
+    db.run('DELETE FROM vardiya_kayit WHERE ay = :a AND personel_id = :p AND gun = :g',
+      { ':a': ay, ':p': personelId, ':g': gun });
+    return { ay, personel_id: personelId, gun, kod: '' };
+  }
+  db.run(
+    `INSERT INTO vardiya_kayit (ay, personel_id, gun, kod) VALUES (:a, :p, :g, :k)
+     ON CONFLICT(ay, personel_id, gun) DO UPDATE SET kod = excluded.kod`,
+    { ':a': ay, ':p': personelId, ':g': gun, ':k': temiz }
+  );
+  return { ay, personel_id: personelId, gun, kod: temiz };
+}
+
+function vardiyaTopluYaz(kayitlar) {
+  let n = 0;
+  islem(() => {
+    for (const k of kayitlar) { vardiyaYaz(k.ay, k.personel_id, k.gun, k.kod); n++; }
+  });
+  return n;
+}
+
+function vardiyaAySil(ay) {
+  db.run('DELETE FROM vardiya_kayit WHERE ay = :a', { ':a': ay });
+}
+
 function logYaz(tarih, tur, mesaj) {
   db.run('INSERT INTO islem_log (tarih, tur, mesaj) VALUES (:t, :tur, :m)', {
     ':t': tarih || null, ':tur': tur, ':m': mesaj,
@@ -463,4 +572,7 @@ module.exports = {
   kayitYaz, hucreGuncelle, gunKategoriAc, gunSil, kategoriSifirla, otomatikIsaretle,
   eslesmeler, eslesmeEkle, eslesmeSil, eslesmeleriDisaAktar, eslesmeleriIceAktar,
   onerileriYaz, oneriler, logYaz, loglar, ozet,
+  vardiyaEkipler, vardiyaEkipEkle, vardiyaEkipGuncelle, vardiyaEkipSil,
+  vardiyaPersoneller, vardiyaPersonelEkle, vardiyaPersonelSil, vardiyaPersonelTasi,
+  vardiyaAyVerisi, vardiyaAylar, vardiyaYaz, vardiyaTopluYaz, vardiyaAySil,
 };

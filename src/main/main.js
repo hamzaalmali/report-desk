@@ -9,6 +9,8 @@ const db = require('./db/db');
 const { gecmisiAktar } = require('./import/gecmisAktar');
 const { gunlukAktar } = require('./import/gunlukAktar');
 const { aylikDisaAktar, gunlukDisaAktar } = require('./export/excelDisaAktar');
+const { vardiyaIceAktar } = require('./import/vardiyaAktar');
+const { vardiyaDisaAktar } = require('./export/vardiyaDisaAktar');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
@@ -473,4 +475,28 @@ kanal('hepsiniSifirla', async () => {
   kayit(`Her şey sıfırlandı. Yedek: ${yedek || '(dosya yoktu)'}`);
   return { iptal: false, yedek };
 }, true);
+kanal('vardiyaEkipler', () => db.vardiyaEkipler());
+kanal('vardiyaEkipEkle', (ad, v) => { db.vardiyaEkipEkle(ad, v); return db.vardiyaEkipler(); });
+kanal('vardiyaEkipGuncelle', (id, p) => db.vardiyaEkipGuncelle(id, p));
+kanal('vardiyaEkipSil', (id) => { db.vardiyaEkipSil(id); return db.vardiyaEkipler(); });
+kanal('vardiyaPersonelEkle', (ekipId, ad) => { db.vardiyaPersonelEkle(ekipId, ad); return db.vardiyaPersoneller(null); });
+kanal('vardiyaPersonelSil', (id) => { db.vardiyaPersonelSil(id); return db.vardiyaPersoneller(null); });
+kanal('vardiyaPersonelTasi', (id, yon) => { db.vardiyaPersonelTasi(id, yon); return db.vardiyaPersoneller(null); });
+kanal('vardiyaAyVerisi', (ay) => db.vardiyaAyVerisi(ay));
+kanal('vardiyaAylar', () => db.vardiyaAylar());
+kanal('vardiyaYaz', (ay, pid, gun, kod) => db.vardiyaYaz(ay, pid, gun, kod));
+kanal('vardiyaAySil', (ay) => { db.vardiyaAySil(ay); return true; });
+kanal('vardiyaAktar', (dosyalar, s) => vardiyaIceAktar(dosyalar, s));
+
+kanal('vardiyaExcel', async (ay) => {
+  const r = await dialog.showSaveDialog(pencere, {
+    title: 'Vardiya tablosunu kaydet',
+    defaultPath: `Vardiya-${ay}.xlsx`,
+    filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+  });
+  if (r.canceled) return null;
+  await vardiyaDisaAktar(ay, r.filePath);
+  return r.filePath;
+});
+
 kanal('guncellemeKontrol', () => guncellemeKontrol());

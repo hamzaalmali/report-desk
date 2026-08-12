@@ -72,3 +72,29 @@ CREATE TABLE IF NOT EXISTS ayar (
   anahtar TEXT PRIMARY KEY,
   deger   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS vardiya_ekip (
+  id          INTEGER PRIMARY KEY,
+  ad          TEXT    NOT NULL UNIQUE,
+  vardiyalar  TEXT    NOT NULL DEFAULT 'A,B',
+  sira        INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS vardiya_personel (
+  id       INTEGER PRIMARY KEY,
+  ekip_id  INTEGER NOT NULL REFERENCES vardiya_ekip(id) ON DELETE CASCADE,
+  ad       TEXT    NOT NULL,
+  sira     INTEGER NOT NULL DEFAULT 0,
+  aktif    INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (ekip_id, ad)
+);
+
+CREATE TABLE IF NOT EXISTS vardiya_kayit (
+  ay           TEXT    NOT NULL,
+  personel_id  INTEGER NOT NULL REFERENCES vardiya_personel(id) ON DELETE CASCADE,
+  gun          INTEGER NOT NULL,
+  kod          TEXT    NOT NULL,
+  PRIMARY KEY (ay, personel_id, gun)
+);
+
+CREATE INDEX IF NOT EXISTS ix_vardiya_kayit_ay ON vardiya_kayit (ay);

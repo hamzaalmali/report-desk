@@ -19,6 +19,7 @@ const IKON = {
   kapat: '<path d="M18 6 6 18M6 6l12 12"/>',
   ok: '<path d="M20 6 9 17l-5-5"/>',
   uyari: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
+  vardiya: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   sol: '<path d="m15 18-6-6 6-6"/>',
   sag: '<path d="m9 18 6-6-6-6"/>',
   yukari: '<path d="m18 15-6-6-6 6"/>',
@@ -37,6 +38,7 @@ const SAYFALAR = [
   { id: 'gecmis',   ad: 'Geçmiş Aktarım',  alt: 'Eski geniş tabloları içe aktar', ikon: 'gecmis' },
   { id: 'eslesme',  ad: 'Eşleştirme',      alt: 'Rapor metni → işletme kuralları',      ikon: 'eslesme' },
   { id: 'oneri',    ad: 'Öneriler', alt: 'Elle işaretlenecek kayıtlar',    ikon: 'oneri' },
+  { id: 'vardiya',  ad: 'Vardiya',  alt: 'Aylık vardiya çizelgesi',        ikon: 'vardiya' },
 ];
 
 const AY_ADI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -233,7 +235,8 @@ async function git(id) {
   try {
     await ({
       genel: sayfaGenel, gunluk: sayfaGunluk, ay: sayfaAy, aktar: sayfaAktar,
-      gecmis: sayfaGecmis, eslesme: sayfaEslesme, oneri: sayfaOneri, ayarlar: sayfaAyarlar,
+      gecmis: sayfaGecmis, eslesme: sayfaEslesme, oneri: sayfaOneri,
+      vardiya: sayfaVardiya, ayarlar: sayfaAyarlar,
     }[id] || sayfaGenel)();
   } catch (e) {
     el('icerik').innerHTML = `<div class="card p-6 text-danger">${kacar(e.message)}</div>`;
@@ -1162,6 +1165,260 @@ async function sayfaOneri() {
       </div>
     </div>`;
   el('gunlugeGit2').onclick = () => git('gunluk');
+}
+
+const V_KODLAR = [
+  { kod: 'A', ad: 'A · 07:00-15:00', renk: '#3b82f6' },
+  { kod: 'B', ad: 'B · 15:00-23:00', renk: '#f59e0b' },
+  { kod: 'C', ad: 'C · 23:00-07:00', renk: '#22c55e' },
+  { kod: 'R.T', ad: 'Resmî tatil', renk: '#f0525b' },
+  { kod: 'Yİ', ad: 'Yıllık izin', renk: '#a78bfa' },
+  { kod: 'Sİ', ad: 'Sendikal izin', renk: '#06b6d4' },
+  { kod: 'Fİ', ad: 'Fazla çalışma izni', renk: '#94a3b8' },
+  { kod: '', ad: 'Boş / sil', renk: 'transparent' },
+];
+const V_RENK = new Map(V_KODLAR.map((k) => [k.kod, k.renk]));
+
+function vAyGun(ay) {
+  const [y, a] = ay.split('-').map(Number);
+  return new Date(Date.UTC(y, a, 0)).getUTCDate();
+}
+
+function vGunAdi(ay, gun) {
+  const [y, a] = ay.split('-').map(Number);
+  return ['Pz', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'][new Date(Date.UTC(y, a - 1, gun)).getUTCDay()];
+}
+
+function vVardiyalari(ekip) {
+  const l = String(ekip.vardiyalar || 'A,B').split(',').map((x) => x.trim()).filter(Boolean);
+  return l.length ? l : ['A', 'B'];
+}
+
+async function sayfaVardiya() {
+  if (!D.vardiyaAy) {
+    const aylar = await cagir(api.vardiyaAylar());
+    const b = new Date();
+    D.vardiyaAy = aylar.length ? aylar[0].ay
+      : `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, '0')}`;
+  }
+  if (!D.vFirca) D.vFirca = 'A';
+
+  const veri = await cagir(api.vardiyaAyVerisi(D.vardiyaAy));
+  D.vardiyaVeri = veri;
+
+  el('navAraclar').innerHTML = `
+    <input type="month" id="vAy" value="${D.vardiyaAy}" class="input" />
+    <button class="btn btn-sm" id="vIceAktar">${svg('aktar', 'size-3.5')} İçe aktar</button>
+    <button class="btn btn-sm btn-brand" id="vExcel">${svg('excel', 'size-3.5')} Excel'e aktar</button>`;
+  el('vAy').onchange = (e) => { D.vardiyaAy = e.target.value; sayfaVardiya(); };
+  el('vExcel').onclick = async () => {
+    try {
+      const yol = await cagir(api.vardiyaExcel(D.vardiyaAy));
+      if (!yol) return;
+      bildir(`<b>Vardiya tablosu kaydedildi.</b><br>${kacar(yol)}`, 'basari');
+      api.klasorAc(yol);
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+  el('vIceAktar').onclick = async () => {
+    const dosyalar = await cagir(api.dosyaSec('Vardiya Excel dosyalarını seçin'));
+    if (!dosyalar.length) return;
+    try {
+      const r = await cagir(api.vardiyaAktar(dosyalar));
+      bildir(`<b>${r.aylar.length} ay aktarıldı.</b><br>`
+        + `${r.ekipler.join(', ')} · ${r.personel} yeni personel · ${r.kayit} kayıt`
+        + (r.farkli.length ? `<br>Standart dışı kod: ${kacar(r.farkli.join(', '))}` : ''), 'basari');
+      if (r.aylar.length) D.vardiyaAy = r.aylar[r.aylar.length - 1];
+      sayfaVardiya();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  if (!veri.ekipler.length) {
+    el('icerik').innerHTML = `
+      <div class="card flex flex-col items-center gap-3 p-12 text-center">
+        <div class="text-fg-2">Henüz ekip yok.</div>
+        <div class="text-[12px] text-fg-3">Mevcut vardiya Excel'inizi içe aktarın ya da elle ekip oluşturun.</div>
+        <div class="mt-2 flex gap-2">
+          <button class="btn btn-brand" id="vBosAktar">${svg('aktar', 'size-4')} Excel'den içe aktar</button>
+          <button class="btn" id="vBosEkip">Ekip ekle</button>
+        </div>
+      </div>`;
+    el('vBosAktar').onclick = () => el('vIceAktar').click();
+    el('vBosEkip').onclick = vEkipEkle;
+    return;
+  }
+
+  const gun = vAyGun(D.vardiyaAy);
+  const gunler = Array.from({ length: gun }, (_, i) => i + 1);
+
+  const firca = V_KODLAR.map((k) => `
+    <button class="chip ${D.vFirca === k.kod ? 'ring-1 ring-brand' : ''}"
+            style="border-color:${k.renk === 'transparent' ? 'var(--color-line-2)' : k.renk};
+                   color:${k.renk === 'transparent' ? 'var(--color-fg-3)' : k.renk}"
+            data-firca="${k.kod}" title="${kacar(k.ad)}">${k.kod || 'boş'}</button>`).join('');
+
+  const bloklar = veri.ekipler.map((ekip) => {
+    const kisiler = veri.personeller.filter((p) => p.ekip_id === ekip.id);
+    const kayit = new Map();
+    for (const k of veri.kayitlar) kayit.set(`${k.personel_id}|${k.gun}`, k.kod);
+
+    const baslik = gunler.map((g) => {
+      const hs = ['Ct', 'Pz'].includes(vGunAdi(D.vardiyaAy, g));
+      return `<th class="v-gun ${hs ? 'v-hafta' : ''}">
+        <div>${g}</div><div class="text-[8px] font-normal opacity-60">${vGunAdi(D.vardiyaAy, g)}</div></th>`;
+    }).join('');
+
+    const satirlar = kisiler.map((p) => `
+      <tr>
+        <td class="v-ad" title="${kacar(p.ad)}">
+          <span class="flex items-center justify-between gap-1">
+            <span class="truncate">${kacar(p.ad)}</span>
+            <button class="v-sil" data-psil="${p.id}" title="Personeli sil">×</button>
+          </span>
+        </td>
+        ${gunler.map((g) => {
+          const kod = kayit.get(`${p.id}|${g}`) || '';
+          const renk = V_RENK.get(kod);
+          const bilinen = V_RENK.has(kod);
+          return `<td class="v-h ${['Ct', 'Pz'].includes(vGunAdi(D.vardiyaAy, g)) ? 'v-hafta' : ''}"
+                      data-p="${p.id}" data-g="${g}"
+                      style="${kod && bilinen ? `background:${renk}22;color:${renk}` : ''}"
+                      title="${kacar(p.ad)} · ${g}${kod && !bilinen ? ' · ' + kacar(kod) : ''}"
+                  >${bilinen ? kacar(kod) : '!'}</td>`;
+        }).join('')}
+      </tr>`).join('');
+
+    const sayimlar = vVardiyalari(ekip).map((v) => `
+      <tr class="v-sayim">
+        <td class="v-ad text-[10px]">${v}: ${v === 'A' ? '07:00-15:00' : v === 'B' ? '15:00-23:00' : '23:00-07:00'}</td>
+        ${gunler.map((g) => {
+          const n = kisiler.filter((p) => kayit.get(`${p.id}|${g}`) === v).length;
+          return `<td class="v-h" data-sayim="${ekip.id}-${v}-${g}">${n || ''}</td>`;
+        }).join('')}
+      </tr>`).join('');
+
+    return `
+      <div class="card mb-4">
+        <div class="card-head">
+          <div class="flex items-center gap-2">
+            <div class="font-medium">${kacar(ekip.ad)}</div>
+            <span class="chip border-line-2 text-fg-3">${kisiler.length} kişi · ${ekip.vardiyalar}</span>
+          </div>
+          <div class="flex gap-1">
+            <button class="btn btn-sm" data-pekle="${ekip.id}">${svg('ekle', 'size-3.5')} Personel</button>
+            <button class="btn btn-sm" data-vekip="${ekip.id}" data-v="${kacar(ekip.vardiyalar)}">Vardiyalar</button>
+            <button class="btn btn-sm" data-esil="${ekip.id}" data-ead="${kacar(ekip.ad)}">${svg('sil', 'size-3.5')}</button>
+          </div>
+        </div>
+        <div class="overflow-auto">
+          <table class="v-tablo">
+            <thead><tr><th class="v-ad">Personel</th>${baslik}</tr></thead>
+            <tbody>${satirlar}${sayimlar}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
+
+  el('icerik').innerHTML = `
+    <div class="mb-3 flex shrink-0 flex-wrap items-center gap-2">
+      <span class="text-[12px] text-fg-3">Fırça:</span>
+      ${firca}
+      <span class="ml-2 text-[11.5px] text-fg-3">
+        Kod seç, hücrelere tıkla ya da sürükleyerek boya · alttaki sayılar kendiliğinden güncellenir</span>
+      <button class="btn btn-sm ml-auto" id="vEkipEkle">${svg('ekle', 'size-3.5')} Ekip ekle</button>
+    </div>
+    <div class="min-h-0 flex-1 overflow-auto">${bloklar}</div>`;
+
+  el('icerik').querySelectorAll('[data-firca]').forEach((b) => {
+    b.onclick = () => { D.vFirca = b.dataset.firca; sayfaVardiya(); };
+  });
+  el('vEkipEkle').onclick = vEkipEkle;
+
+  el('icerik').querySelectorAll('[data-pekle]').forEach((b) => {
+    b.onclick = async () => {
+      const ad = prompt('Personel adı:');
+      if (!ad || !ad.trim()) return;
+      try {
+        await cagir(api.vardiyaPersonelEkle(Number(b.dataset.pekle), ad.trim()));
+        sayfaVardiya();
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
+  el('icerik').querySelectorAll('[data-psil]').forEach((b) => {
+    b.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!confirm('Personel ve bütün vardiya kayıtları silinecek. Emin misiniz?')) return;
+      await cagir(api.vardiyaPersonelSil(Number(b.dataset.psil)));
+      sayfaVardiya();
+    };
+  });
+  el('icerik').querySelectorAll('[data-esil]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm(`"${b.dataset.ead}" ekibi, personeli ve tüm kayıtları silinecek. Emin misiniz?`)) return;
+      await cagir(api.vardiyaEkipSil(Number(b.dataset.esil)));
+      sayfaVardiya();
+    };
+  });
+  el('icerik').querySelectorAll('[data-vekip]').forEach((b) => {
+    b.onclick = async () => {
+      const v = prompt('Bu ekipteki vardiyalar (virgülle):', b.dataset.v);
+      if (v == null) return;
+      await cagir(api.vardiyaEkipGuncelle(Number(b.dataset.vekip), { vardiyalar: v }));
+      sayfaVardiya();
+    };
+  });
+
+  let boyuyor = false;
+  const boya = async (td) => {
+    if (!td || td.dataset.p === undefined) return;
+    const pid = Number(td.dataset.p), g = Number(td.dataset.g);
+    const kod = D.vFirca;
+    if (td.textContent === kod && !!kod) return;
+    td.textContent = kod;
+    const renk = V_RENK.get(kod);
+    td.style.background = kod ? `${renk}22` : '';
+    td.style.color = kod ? renk : '';
+    try {
+      await cagir(api.vardiyaYaz(D.vardiyaAy, pid, g, kod));
+      vSayimTazele();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('icerik').querySelectorAll('.v-h[data-p]').forEach((td) => {
+    td.onmousedown = (e) => { e.preventDefault(); boyuyor = true; boya(td); };
+    td.onmouseenter = () => { if (boyuyor) boya(td); };
+  });
+  document.addEventListener('mouseup', () => { boyuyor = false; }, { once: true });
+}
+
+function vSayimTazele() {
+  const veri = D.vardiyaVeri;
+  if (!veri) return;
+  for (const ekip of veri.ekipler) {
+    const kisiler = veri.personeller.filter((p) => p.ekip_id === ekip.id);
+    for (const v of vVardiyalari(ekip)) {
+      for (let g = 1; g <= vAyGun(D.vardiyaAy); g++) {
+        const hedef = el('icerik').querySelector(`[data-sayim="${ekip.id}-${v}-${g}"]`);
+        if (!hedef) continue;
+        let n = 0;
+        for (const p of kisiler) {
+          const td = el('icerik').querySelector(`.v-h[data-p="${p.id}"][data-g="${g}"]`);
+          if (td && td.textContent === v) n++;
+        }
+        hedef.textContent = n || '';
+      }
+    }
+  }
+}
+
+async function vEkipEkle() {
+  const ad = prompt('Ekip adı:');
+  if (!ad || !ad.trim()) return;
+  const v = prompt('Vardiyalar (virgülle):', 'A,B');
+  if (v == null) return;
+  try {
+    await cagir(api.vardiyaEkipEkle(ad.trim(), v.trim() || 'A,B'));
+    sayfaVardiya();
+  } catch (e) { bildir(kacar(e.message), 'hata'); }
 }
 
 async function sayfaAyarlar() {
