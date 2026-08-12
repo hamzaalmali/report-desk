@@ -60,6 +60,9 @@ contextBridge.exposeInMainWorld('api', {
   waCikis: () => cagir('waCikis'),
   waDinle: (fn) => { ipcRenderer.on('waDurum', (_o, veri) => fn(veri)); },
 
+  kilitDurum: () => cagir('kilitDurum'),
+  kilitTazele: () => cagir('kilitTazele'),
+
   surum: () => cagir('surum'),
   vtDurum: () => cagir('vtDurum'),
   vtOnar: () => cagir('vtOnar'),

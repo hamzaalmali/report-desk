@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const http = require('node:http');
 
 const db = require('../src/main/db/db');
 const { genisTabloOku } = require('../src/main/import/genisTablo');
@@ -16,6 +17,7 @@ const { key } = require('../src/shared/tr');
 const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
 const { vardiyaIceAktar } = require('../src/main/import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('../src/main/export/vardiyaDisaAktar');
+const kilit = require('../src/main/kilit');
 
 const KOK = process.argv[3] || path.join(__dirname, '..', '..');
 
@@ -142,8 +144,6 @@ async function main() {
   }
 
   console.log('\nGünlük rapor aktarımı');
-  // Bir günün dosyaları tek klasörde durur; adında tarih olan ilk dosyanın
-  // klasöründeki bütün Excel'ler o güne aittir (bazılarının adında tarih olmayabilir).
   const tarihliIlk = excelAra(KOK).find((f) => /\d{2}\.\d{2}\.\d{4}/.test(path.basename(f)));
   const gunlukDosyalar = tarihliIlk
     ? excelAra(path.dirname(tarihliIlk)).filter((f) => path.dirname(f) === path.dirname(tarihliIlk))
@@ -255,7 +255,6 @@ async function main() {
       const s = db.gunVerisi(t).satirlar.find((x) => x.kategori_kod === kod && x.isletme_id === id);
       return s ? s[alan] : null;
     };
-    // raporda gerçekten işareti olan bir işletme seç, sabit sıra numarasına güvenme
     const isaretli = db.gunVerisi(t).satirlar.find((s) => s.kategori_kod === 'BINA_TIPI_OSOS' && s.ariza_var);
     db.hucreGuncelle({ tarih: t, isletme_id: isl[0].id, kategori_id: kat.get('IL_ILCE').id, alan: 'tutanak_gerekli', deger: 1 });
     db.hucreGuncelle({ tarih: t, isletme_id: isaretli.isletme_id, kategori_id: kat.get('BINA_TIPI_OSOS').id, alan: 'donus_saglandi', deger: 1 });
@@ -313,7 +312,6 @@ async function main() {
       ekipten('16 CBZ 919 (MÜRACAAT EKİBİ)') === undefined,
       String(ekipten('16 CBZ 919 (MÜRACAAT EKİBİ)')));
 
-    // ekipten gelen işaretler elle konanları silmemeli
     const t = r.tarih;
     const kat = db.kategoriHaritasi();
     const elle = db.isletmeler().find((i) => !db.gunVerisi(t).satirlar
@@ -380,7 +378,6 @@ async function main() {
     const cikti = await vardiyaDisaAktar(ay, yol);
     kontrol('vardiya Excel yazıldı', cikti.gun >= 28 && cikti.ekip > 0, JSON.stringify(cikti));
 
-    // gidiş-dönüş: yazılan dosya tekrar okununca aynı çizelge çıkmalı
     const ikinci = fs.mkdtempSync(path.join(os.tmpdir(), 'vardiya-rt-'));
     const anaVt = db.yol();
     db.ac(path.join(ikinci, 'v.sqlite'));
@@ -400,6 +397,56 @@ async function main() {
     const say = db.vardiyaAyVerisi(ay).kayitlar
       .filter((k) => k.ekip_id === ekip.id && k.gun === 1 && k.kod === 'A').length;
     kontrol('günlük vardiya sayımı hesaplanabiliyor', Number.isInteger(say), String(say));
+    db.ac(anaVt);
+  }
+
+  console.log('\nUzaktan durdurma');
+  {
+    let icerik = '{"durum":"acik","mesaj":""}';
+    let sunuyor = true;
+    const sunucu = http.createServer((_q, r) => {
+      if (!sunuyor) { r.socket.destroy(); return; }
+      r.writeHead(200, { 'Content-Type': 'application/json' });
+      r.end(icerik);
+    });
+    await new Promise((r) => sunucu.listen(0, '127.0.0.1', r));
+    const adres = `http://127.0.0.1:${sunucu.address().port}/durum.json`;
+
+    const kilitVt = path.join(gecici, 'kilit.sqlite');
+    const anaVt = db.yol();
+    db.ac(kilitVt);
+
+    let d = await kilit.kur(db, () => { }, adres);
+    kontrol('açıkken kilit yok', d.kilitli === false && !d.sonHata, JSON.stringify(d));
+    kontrol('kontrol zamanı kaydediliyor', !!d.sonKontrol);
+
+    icerik = '{"durum":"kapali","mesaj":"Durduruldu."}';
+    d = await kilit.kontrolEt();
+    kontrol('kapali görünce kilitleniyor',
+      d.kilitli === true && d.mesaj === 'Durduruldu.', JSON.stringify(d));
+
+    sunuyor = false;
+    d = await kilit.kontrolEt();
+    kontrol('ağ kopunca kilit açılmıyor', d.kilitli === true && !!d.sonHata, JSON.stringify(d));
+
+    kilit.durdur();
+    db.kapat();
+    db.ac(kilitVt);
+    kilit.kur(db, () => { }, adres);
+    kontrol('yeniden açılışta kilit hatırlanıyor', kilit.durumAl().kilitli === true);
+
+    sunuyor = true;
+    icerik = 'bozuk json';
+    d = await kilit.kontrolEt();
+    kontrol('bozuk durum dosyası kilidi düşürmüyor',
+      d.kilitli === true && !!d.sonHata, JSON.stringify(d));
+
+    icerik = '{"durum":"acik"}';
+    d = await kilit.kontrolEt();
+    kontrol('tekrar acik olunca kilit kalkıyor', d.kilitli === false, JSON.stringify(d));
+
+    kilit.durdur();
+    sunucu.close();
     db.ac(anaVt);
   }
 
@@ -426,7 +473,6 @@ async function main() {
     kontrol('her gün kendi kayıtlarını aldı',
       toplu.gunler.every((g) => g.isaretToplam > 0),
       toplu.gunler.map((g) => `${g.tarih}:${g.isaretToplam}`).join(' '));
-    // iki gün varsa adı tarihsiz dosyalar tahmin edilmez, oldukları gibi bildirilir
     const adsizAdet = [...gunlukDosyalar, ...kopyalar]
       .filter((d) => !/\d{2}\.\d{2}\.\d{4}/.test(path.basename(d))).length;
     kontrol('adı tarihsiz dosyalar eksiksiz bildiriliyor',

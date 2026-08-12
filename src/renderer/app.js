@@ -72,8 +72,28 @@ const el = (id) => document.getElementById(id);
 
 async function cagir(sozVerilen) {
   const r = await sozVerilen;
+  if (r && r.kilitli) { kilitEkrani(r.hata); throw new Error(r.hata || 'Kapalı'); }
   if (!r || !r.ok) throw new Error((r && r.hata) || 'Bilinmeyen hata');
   return r.veri;
+}
+
+function kilitEkrani(mesaj) {
+  if (document.getElementById('kilitKatman')) return;
+  const d = document.createElement('div');
+  d.id = 'kilitKatman';
+  d.className = 'fixed inset-0 z-[200] flex items-center justify-center bg-bg-100 p-8';
+  d.innerHTML = `
+    <div class="card w-96 p-8 text-center">
+      <div class="mb-3 flex justify-center text-danger">${svg('uyari', 'size-12')}</div>
+      <div class="text-[15px] font-medium">Program kullanıma kapatıldı</div>
+      <div class="mt-2 text-[12.5px] text-fg-2">${kacar(mesaj || 'Yöneticinize başvurun.')}</div>
+      <button class="btn mt-5" id="kilitYenile">Yeniden dene</button>
+    </div>`;
+  document.body.appendChild(d);
+  document.getElementById('kilitYenile').onclick = async () => {
+    const r = await api.kilitTazele();
+    if (r && r.ok && !r.veri.kilitli) location.reload();
+  };
 }
 
 function bildir(mesaj, tur = 'bilgi') {
@@ -1752,6 +1772,10 @@ function baslat() {
 
   api.surum().then((r) => {
     if (r && r.ok) el('surumEtiket').textContent = 'sürüm ' + r.veri.surum;
+  });
+
+  api.kilitDurum().then((r) => {
+    if (r && r.ok && r.veri.kilitli) kilitEkrani(r.veri.mesaj);
   });
 
   api.guncellemeDinle((veri) => {

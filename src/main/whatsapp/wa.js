@@ -54,7 +54,6 @@ async function baslat() {
   clearTimeout(zamanlayici);
   bildir({ asama: 'baglaniyor', qr: null, hata: null });
 
-  // Baileys 7 saf ESM; Electron'un Node'u require() ile yükleyemez.
   const mod = await import('@whiskeysockets/baileys');
   const b = mod.default && mod.default.makeWASocket ? mod.default : mod;
   const makeWASocket = b.makeWASocket || b.default || mod.default;
@@ -102,7 +101,6 @@ async function baslat() {
 
       if (kapatiliyor) { bildir({ asama: 'kapali', qr: null, numara: null, ad: null }); return; }
 
-      // Oturum düşürülmüşse kimlik dosyaları geçersizdir; temizlenmeli.
       if (kod === DisconnectReason.loggedOut) {
         oturumuTemizle();
         bildir({ asama: 'kapali', qr: null, numara: null, ad: null,

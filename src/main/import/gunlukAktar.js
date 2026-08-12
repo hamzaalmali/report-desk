@@ -363,8 +363,6 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       if (!kat) continue;
       acilan.push(kat.id);
 
-      // İL-İLÇE'de işaretler ekip adından çıkarılıyor: sıfırlama YOK, yalnız ekleme.
-      // Çözülemeyenleri Hamza elle işaretliyor, yeniden aktarım onları silmemeli.
       if (!kat.otomatik) {
         const adet = set.size ? db.otomatikIsaretle(tarih, kat.id, [...set], kat.genislik) : 0;
         yaziliKategoriler.push({ kod, adet, otomatik: false });

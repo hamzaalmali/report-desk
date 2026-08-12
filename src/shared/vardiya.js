@@ -61,7 +61,6 @@ function saatBasligi(kod) {
   return SAATLER[kod] ? `${kod}: ${SAATLER[kod]}` : kod;
 }
 
-// Bir günde her vardiya kodundan kaç kişi var
 function gunlukSayim(kayitlar, vardiyalar, gun) {
   const sayim = {};
   for (const v of vardiyalar) sayim[v] = 0;

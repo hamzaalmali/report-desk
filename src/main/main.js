@@ -12,6 +12,7 @@ const { aylikDisaAktar, gunlukDisaAktar } = require('./export/excelDisaAktar');
 const { vardiyaIceAktar } = require('./import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('./export/vardiyaDisaAktar');
 const wa = require('./whatsapp/wa');
+const kilit = require('./kilit');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
@@ -134,10 +135,6 @@ function pencereOlustur() {
   });
 }
 
-// node-sqlite3-wasm kilitlemeyi "<dosya>.lock" adlı bir klasör oluşturarak yapar.
-// Program çökerse ya da zorla kapatılırsa bu klasör kalır ve sonraki her açılış
-// "database is locked" verir. Tek kopya kilidini biz tuttuğumuz için, burada
-// görülen kilit klasörü kesinlikle artıktır ve silinebilir.
 function artikKilidiTemizle(dosyaYolu) {
   const kilit = dosyaYolu + '.lock';
   try {
@@ -241,7 +238,6 @@ function veritabaniniAc() {
       const bilgi = tanila(y);
       kayit('Teşhis: ' + JSON.stringify(bilgi));
       if (!ilkHata) { ilkHata = metin; ilkBilgi = bilgi; }
-      // Dosya bozuksa ikinci konumu denemenin anlamı yok, kullanıcı onarmalı
       if (bilgi.motorCalisiyor !== false && bilgi.yazilabilir !== false) break;
     }
   }
@@ -258,6 +254,11 @@ app.whenReady().then(() => {
     guncellemeyiKur(() => pencere);
   } catch (e) {
     hataYaz('güncelleme kurulumu', e);
+  }
+  try {
+    kilit.kur(db, kayit).catch((e) => hataYaz('uzak durum', e));
+  } catch (e) {
+    hataYaz('uzak durum kurulumu', e);
   }
   try {
     wa.kur(path.join(app.getPath('userData'), 'whatsapp-oturum'), (d) => {
@@ -282,8 +283,14 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
+const KILITSIZ = new Set(['surum', 'kilitDurum', 'panoyaKopyala', 'gunluguAc', 'klasorAc']);
+
 function kanal(ad, fn, vtGerekmez = false) {
   ipcMain.handle(ad, async (_olay, ...args) => {
+    if (!KILITSIZ.has(ad)) {
+      const k = kilit.durumAl();
+      if (k.kilitli) return { ok: false, kilitli: true, hata: k.mesaj || 'Program kullanıma kapatıldı.' };
+    }
     if (dbHatasi && !vtGerekmez) return { ok: false, hata: dbHatasi, vtHatasi: true };
     try {
       return { ok: true, veri: await fn(...args) };
@@ -411,8 +418,6 @@ kanal('panoyaKopyala', (metin) => {
 kanal('vtOnar', () => {
   const kaynak = VERI_DOSYASI();
 
-  // Önce en zararsız onarım: artık kalmış kilidi temizleyip yeniden dene.
-  // Bu çoğu durumda yeterlidir ve veriye hiç dokunmaz.
   const kilitVardi = artikKilidiTemizle(kaynak);
   if (kilitVardi) {
     veritabaniniAc();
@@ -512,5 +517,8 @@ kanal('waDurum', () => wa.durumAl(), true);
 kanal('waBaslat', () => wa.baslat(), true);
 kanal('waDurdur', () => wa.durdur(), true);
 kanal('waCikis', () => wa.cikisYap(), true);
+
+kanal('kilitDurum', () => kilit.durumAl(), true);
+kanal('kilitTazele', () => kilit.kontrolEt(), true);
 
 kanal('guncellemeKontrol', () => guncellemeKontrol());

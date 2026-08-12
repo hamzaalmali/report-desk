@@ -19,7 +19,6 @@ function ayCoz(sayfaAdi, varsayilanYil) {
   return `${yil}-${String(ix + 1).padStart(2, '0')}`;
 }
 
-// Gün numaraları satırı: B'den itibaren 1,2,3… diye giden satır. Blokların çapası bu.
 function gunSatiriMi(ws, r, beklenenGun) {
   const ilk = hucreMetni(ws.getCell(r, 2));
   if (ilk !== '1') return 0;
