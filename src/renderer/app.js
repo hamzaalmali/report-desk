@@ -1525,6 +1525,17 @@ function waCiz(d) {
       </div>
 
       <div class="card mt-4">
+        <div class="card-head">
+          <div class="font-medium">Gruplar</div>
+          <button class="btn btn-sm" id="waGrupTazele" ${d.asama === 'bagli' ? '' : 'disabled'}>
+            ${svg('yenile', 'size-3.5')} Grupları getir</button>
+        </div>
+        <div class="max-h-80 overflow-y-auto p-3" id="waGrupKutu"></div>
+      </div>
+
+      ${waGonderBolumu(d.asama === 'bagli')}
+
+      <div class="card mt-4">
         <div class="card-head"><div class="font-medium">Bilinmesi gerekenler</div></div>
         <div class="space-y-2 p-5 text-[12px] text-fg-2">
           <div>· Oturum dosyaları: <span class="font-mono text-[11px] text-fg-3">${kacar(d.yol || '')}</span></div>
@@ -1535,7 +1546,20 @@ function waCiz(d) {
       </div>
     </div>`;
 
+  waGruplariCiz();
+  waGonderBagla(d.asama === 'bagli');
+
   const bagla = (id, fn) => { const b = el(id); if (b) b.onclick = fn; };
+  bagla('waGrupTazele', async () => {
+    const b = el('waGrupTazele');
+    b.disabled = true;
+    try {
+      const g = await cagir(api.waGruplariTazele());
+      bildir(`<b>${g.length} grup bulundu.</b>`, 'basari');
+      waGruplariCiz();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+    finally { b.disabled = false; }
+  });
   bagla('waBaslat', async () => {
     el('waBaslat').disabled = true;
     try { waCiz(await cagir(api.waBaslat())); }
@@ -1549,6 +1573,132 @@ function waCiz(d) {
       bildir('Oturum silindi.', 'basari');
     } catch (e) { bildir(kacar(e.message), 'hata'); }
   });
+}
+
+async function waGruplariCiz() {
+  const kutu = el('waGrupKutu');
+  if (!kutu) return;
+  const gruplar = await cagir(api.waGruplar());
+  D.waGruplar = gruplar;
+  const secili = gruplar.filter((g) => g.secili).length;
+
+  el('waSeciliSayi').textContent = secili ? `${secili} grup seçili` : 'grup seçilmedi';
+
+  if (!gruplar.length) {
+    kutu.innerHTML = `<div class="py-6 text-center text-[12px] text-fg-3">
+      Henüz liste yok. <b>Grupları getir</b> deyin.</div>`;
+    return;
+  }
+
+  kutu.innerHTML = gruplar.map((g) => `
+    <label class="flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-panel-2">
+      <span class="flex min-w-0 items-center gap-2">
+        <input type="checkbox" class="size-4 shrink-0 accent-[#3ecf8e]"
+               data-grup="${kacar(g.jid)}" ${g.secili ? 'checked' : ''} />
+        <span class="truncate text-[12.5px]">${kacar(g.ad)}</span>
+      </span>
+      <span class="shrink-0 text-[11px] text-fg-3">${g.katilimci} kişi</span>
+    </label>`).join('');
+
+  kutu.querySelectorAll('[data-grup]').forEach((c) => {
+    c.onchange = async () => {
+      try {
+        await cagir(api.waGrupSec(c.dataset.grup, c.checked));
+        waGruplariCiz();
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
+}
+
+function waGonderBolumu(bagli) {
+  const b = new Date();
+  const buAy = `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, '0')}`;
+  const bugun = D.tarih || `${buAy}-${String(b.getDate()).padStart(2, '0')}`;
+  return `
+    <div class="card mt-4">
+      <div class="card-head">
+        <div class="font-medium">Gruplara gönder</div>
+        <span id="waSeciliSayi" class="text-[11.5px] text-fg-3"></span>
+      </div>
+      <div class="space-y-3 p-5">
+        <div class="flex flex-wrap items-end gap-2">
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-fg-3">Ne gönderilsin</span>
+            <select id="waTur" class="input">
+              <option value="icmal-gun">Günlük tablo</option>
+              <option value="icmal-ay">Aylık tablo</option>
+              <option value="vardiya">Vardiya çizelgesi</option>
+            </select>
+          </label>
+          <label class="flex flex-col gap-1" id="waTarihKutu">
+            <span class="text-[11px] text-fg-3">Gün</span>
+            <input type="date" id="waTarih" value="${bugun}" class="input" />
+          </label>
+          <label class="flex flex-col gap-1 hidden" id="waAyKutu">
+            <span class="text-[11px] text-fg-3">Ay</span>
+            <input type="month" id="waAy" value="${buAy}" class="input" />
+          </label>
+          <label class="flex flex-1 flex-col gap-1" style="min-width:200px">
+            <span class="text-[11px] text-fg-3">Mesaja not (isteğe bağlı)</span>
+            <input type="text" id="waNot" class="input" placeholder="Dosyanın altına eklenir" />
+          </label>
+          <button class="btn btn-brand" id="waGonderBtn" ${bagli ? '' : 'disabled'}>
+            ${svg('wa', 'size-4')} Gönder</button>
+        </div>
+        ${bagli ? '' : `<div class="text-[11.5px] text-warn">
+          ${svg('uyari', 'inline size-3.5 -mt-0.5')} Göndermek için önce WhatsApp'a bağlanın.</div>`}
+        <div id="waGonderSonuc"></div>
+      </div>
+    </div>`;
+}
+
+function waGonderBagla(bagli) {
+  const tur = el('waTur');
+  if (!tur) return;
+  const tazele = () => {
+    const gunluk = tur.value === 'icmal-gun';
+    el('waTarihKutu').classList.toggle('hidden', !gunluk);
+    el('waAyKutu').classList.toggle('hidden', gunluk);
+  };
+  tur.onchange = tazele;
+  tazele();
+
+  const btn = el('waGonderBtn');
+  if (!btn || !bagli) return;
+  btn.onclick = async () => {
+    const secili = (D.waGruplar || []).filter((g) => g.secili);
+    if (!secili.length) return bildir('Önce grup seçin.', 'hata');
+    if (!confirm(`${secili.length} gruba gönderilecek:\n\n${secili.map((g) => '· ' + g.ad).join('\n')}\n\nDevam?`)) return;
+
+    btn.disabled = true;
+    const eski = btn.innerHTML;
+    el('waGonderSonuc').innerHTML =
+      `<div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">Gönderiliyor…</div>`;
+    try {
+      const r = await cagir(api.waGonder({
+        tur: el('waTur').value,
+        tarih: el('waTarih').value,
+        ay: el('waAy').value,
+        not: el('waNot').value,
+      }));
+      const basarili = r.ayrinti.filter((x) => x.ok).length;
+      el('waGonderSonuc').innerHTML = `
+        <div class="rounded-md border ${basarili === r.ayrinti.length ? 'border-brand-2/50 bg-brand-dim/40' : 'border-warn/40 bg-warn/10'} p-3 text-[12px]">
+          <div class="mb-1 font-medium">${kacar(r.dosya)} → ${basarili}/${r.ayrinti.length} grup</div>
+          ${r.ayrinti.map((x) => `<div class="${x.ok ? 'text-fg-2' : 'text-danger'}">
+            ${x.ok ? '✓' : '✗'} ${kacar(x.ad)}${x.hata ? ' — ' + kacar(x.hata) : ''}</div>`).join('')}
+        </div>`;
+      bildir(basarili
+        ? `<b>Gönderildi.</b><br>${basarili} grup`
+        : '<b>Gönderilemedi.</b><br>Ayrıntı ekranda', basarili ? 'basari' : 'hata');
+    } catch (e) {
+      el('waGonderSonuc').innerHTML =
+        `<div class="rounded-md border border-danger/40 bg-danger/10 p-3 text-[12px] text-danger">${kacar(e.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = eski;
+    }
+  };
 }
 
 async function sayfaAyarlar() {

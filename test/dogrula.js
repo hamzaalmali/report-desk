@@ -400,6 +400,30 @@ async function main() {
     db.ac(anaVt);
   }
 
+  console.log('\nWhatsApp grup seçimi');
+  {
+    const gelen = [
+      { jid: '1@g.us', ad: 'Bkontrol', katilimci: 12 },
+      { jid: '2@g.us', ad: 'Ateknik', katilimci: 5 },
+    ];
+    let liste = db.waGruplariYaz(gelen);
+    kontrol('gruplar kaydedildi ve ada göre sıralı',
+      liste.length === 2 && liste[0].ad === 'Ateknik', liste.map((g) => g.ad).join(', '));
+    kontrol('hiçbiri baştan seçili değil', db.waSeciliGruplar().length === 0);
+
+    db.waGrupSec('1@g.us', true);
+    kontrol('seçim kaydediliyor',
+      db.waSeciliGruplar().length === 1 && db.waSeciliGruplar()[0].jid === '1@g.us');
+
+    db.waGruplariYaz([{ jid: '1@g.us', ad: 'Bkontrol yeni', katilimci: 13 }]);
+    const g1 = db.waGruplar().find((g) => g.jid === '1@g.us');
+    kontrol('yeniden getirmek seçimi bozmuyor',
+      g1.secili === 1 && g1.ad === 'Bkontrol yeni' && g1.katilimci === 13, JSON.stringify(g1));
+
+    db.waGrupSec('1@g.us', false);
+    kontrol('seçim kaldırılabiliyor', db.waSeciliGruplar().length === 0);
+  }
+
   console.log('\nUzaktan durdurma');
   {
     let icerik = '{"durum":"acik","mesaj":""}';

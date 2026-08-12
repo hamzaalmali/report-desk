@@ -161,4 +161,59 @@ async function cikisYap() {
   return durumAl();
 }
 
-module.exports = { kur, baslat, durdur, cikisYap, durumAl, oturumVarMi };
+const XLSX_TUR = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const GONDERIM_ARASI = 3000;
+
+function bagliMi() {
+  if (!sock || durum.asama !== 'bagli') throw new Error('WhatsApp bağlı değil.');
+  return sock;
+}
+
+async function gruplariGetir() {
+  const s = bagliMi();
+  const hepsi = await s.groupFetchAllParticipating();
+  return Object.values(hepsi || {})
+    .map((g) => ({
+      jid: g.id,
+      ad: g.subject || g.id,
+      katilimci: (g.participants || []).length,
+      duyuru: !!g.announce,
+      yonetici: !!(g.participants || []).some(
+        (p) => p.id === (s.user || {}).id && (p.admin === 'admin' || p.admin === 'superadmin')
+      ),
+    }))
+    .sort((a, b) => a.ad.localeCompare(b.ad, 'tr'));
+}
+
+async function belgeGonder(jid, dosyaYolu, dosyaAdi, aciklama) {
+  const s = bagliMi();
+  const veri = fs.readFileSync(dosyaYolu);
+  await s.sendMessage(jid, {
+    document: veri,
+    fileName: dosyaAdi,
+    mimetype: XLSX_TUR,
+    caption: aciklama || '',
+  });
+}
+
+async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme) {
+  bagliMi();
+  const sonuc = [];
+  for (let i = 0; i < jidler.length; i++) {
+    const jid = jidler[i];
+    try {
+      await belgeGonder(jid, dosyaYolu, dosyaAdi, aciklama);
+      sonuc.push({ jid, ok: true });
+    } catch (e) {
+      sonuc.push({ jid, ok: false, hata: e.message });
+    }
+    if (ilerleme) { try { ilerleme({ sira: i + 1, toplam: jidler.length, jid }); } catch { } }
+    if (i < jidler.length - 1) await new Promise((r) => setTimeout(r, GONDERIM_ARASI));
+  }
+  return sonuc;
+}
+
+module.exports = {
+  kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
+  gruplariGetir, belgeGonder, topluBelgeGonder,
+};

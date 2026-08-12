@@ -8,7 +8,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const db = require('./db/db');
 const { gecmisiAktar } = require('./import/gecmisAktar');
 const { gunlukAktar } = require('./import/gunlukAktar');
-const { aylikDisaAktar, gunlukDisaAktar } = require('./export/excelDisaAktar');
+const { aylikDisaAktar, gunlukDisaAktar, AY_ADLARI } = require('./export/excelDisaAktar');
 const { vardiyaIceAktar } = require('./import/vardiyaAktar');
 const { vardiyaDisaAktar } = require('./export/vardiyaDisaAktar');
 const wa = require('./whatsapp/wa');
@@ -517,6 +517,56 @@ kanal('waDurum', () => wa.durumAl(), true);
 kanal('waBaslat', () => wa.baslat(), true);
 kanal('waDurdur', () => wa.durdur(), true);
 kanal('waCikis', () => wa.cikisYap(), true);
+
+kanal('waGruplar', () => db.waGruplar());
+kanal('waGruplariTazele', async () => db.waGruplariYaz(await wa.gruplariGetir()));
+kanal('waGrupSec', (jid, secili) => db.waGrupSec(jid, secili));
+
+kanal('waGonder', async (istek) => {
+  if (wa.durumAl().asama !== 'bagli') throw new Error('WhatsApp bağlı değil.');
+  const secili = db.waSeciliGruplar();
+  if (!secili.length) throw new Error('Hiç grup seçilmemiş.');
+
+  const klasor = fs.mkdtempSync(path.join(app.getPath('temp'), 'gonder-'));
+  let dosya, ad, aciklama;
+
+  if (istek.tur === 'vardiya') {
+    const [yil, aySayi] = istek.ay.split('-').map(Number);
+    ad = `Vardiya-${istek.ay}.xlsx`;
+    dosya = path.join(klasor, ad);
+    await vardiyaDisaAktar(istek.ay, dosya);
+    aciklama = `${AY_ADLARI[aySayi - 1]} ${yil} vardiya çizelgesi`;
+  } else if (istek.tur === 'icmal-ay') {
+    const [yil, aySayi] = istek.ay.split('-').map(Number);
+    ad = `Tablo-${istek.ay}.xlsx`;
+    dosya = path.join(klasor, ad);
+    await aylikDisaAktar(istek.ay, dosya);
+    aciklama = `${AY_ADLARI[aySayi - 1]} ${yil} tablosu`;
+  } else {
+    const [y, a, g] = istek.tarih.split('-');
+    ad = `Tablo-${g}.${a}.${y}.xlsx`;
+    dosya = path.join(klasor, ad);
+    await gunlukDisaAktar(istek.tarih, dosya);
+    aciklama = `${g}.${a}.${y} günlük tablo`;
+  }
+
+  if (istek.not && istek.not.trim()) aciklama += `\n\n${istek.not.trim()}`;
+
+  const sonuc = await wa.topluBelgeGonder(
+    secili.map((x) => x.jid), dosya, ad, aciklama,
+    (p) => {
+      if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waGonderim', p);
+    }
+  );
+
+  try { fs.rmSync(klasor, { recursive: true, force: true }); } catch { }
+
+  const adlar = new Map(secili.map((x) => [x.jid, x.ad]));
+  const ayrinti = sonuc.map((r) => ({ ...r, ad: adlar.get(r.jid) || r.jid }));
+  db.logYaz(istek.tarih || istek.ay, 'whatsapp-gonderim',
+    `${ad} → ${ayrinti.filter((r) => r.ok).length}/${ayrinti.length} grup`);
+  return { dosya: ad, ayrinti };
+});
 
 kanal('kilitDurum', () => kilit.durumAl(), true);
 kanal('kilitTazele', () => kilit.kontrolEt(), true);

@@ -98,3 +98,11 @@ CREATE TABLE IF NOT EXISTS vardiya_kayit (
 );
 
 CREATE INDEX IF NOT EXISTS ix_vardiya_kayit_ay ON vardiya_kayit (ay);
+
+CREATE TABLE IF NOT EXISTS wa_grup (
+  jid         TEXT PRIMARY KEY,
+  ad          TEXT NOT NULL,
+  katilimci   INTEGER NOT NULL DEFAULT 0,
+  secili      INTEGER NOT NULL DEFAULT 0,
+  guncelleme  TEXT NOT NULL DEFAULT (datetime('now'))
+);

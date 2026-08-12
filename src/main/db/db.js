@@ -507,6 +507,33 @@ function vardiyaAySil(ay) {
   db.run('DELETE FROM vardiya_kayit WHERE ay = :a', { ':a': ay });
 }
 
+function waGruplar() {
+  return db.all('SELECT jid, ad, katilimci, secili FROM wa_grup ORDER BY ad');
+}
+
+function waGruplariYaz(liste) {
+  islem(() => {
+    const st = db.prepare(
+      `INSERT INTO wa_grup (jid, ad, katilimci, guncelleme)
+       VALUES (:j, :a, :k, datetime('now'))
+       ON CONFLICT(jid) DO UPDATE SET
+         ad = excluded.ad, katilimci = excluded.katilimci, guncelleme = datetime('now')`
+    );
+    for (const g of liste) st.run({ ':j': g.jid, ':a': g.ad, ':k': g.katilimci || 0 });
+    st.finalize();
+  });
+  return waGruplar();
+}
+
+function waGrupSec(jid, secili) {
+  db.run('UPDATE wa_grup SET secili = :s WHERE jid = :j', { ':s': secili ? 1 : 0, ':j': jid });
+  return waGruplar();
+}
+
+function waSeciliGruplar() {
+  return db.all('SELECT jid, ad FROM wa_grup WHERE secili = 1 ORDER BY ad');
+}
+
 function logYaz(tarih, tur, mesaj) {
   db.run('INSERT INTO islem_log (tarih, tur, mesaj) VALUES (:t, :tur, :m)', {
     ':t': tarih || null, ':tur': tur, ':m': mesaj,
@@ -575,4 +602,5 @@ module.exports = {
   vardiyaEkipler, vardiyaEkipEkle, vardiyaEkipGuncelle, vardiyaEkipSil,
   vardiyaPersoneller, vardiyaPersonelEkle, vardiyaPersonelSil, vardiyaPersonelTasi,
   vardiyaAyVerisi, vardiyaAylar, vardiyaYaz, vardiyaTopluYaz, vardiyaAySil,
+  waGruplar, waGruplariYaz, waGrupSec, waSeciliGruplar,
 };
