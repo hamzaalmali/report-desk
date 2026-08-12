@@ -5,7 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { Database } = require('node-sqlite3-wasm');
-const { KATEGORILER } = require('../../shared/kategoriler');
+const { KATEGORILER, otomatikAlanlar, TUM_ALANLAR } = require('../../shared/kategoriler');
 const { key } = require('../../shared/tr');
 const { ISLETMELER, ESLESMELER } = require('./seed');
 
@@ -261,11 +261,12 @@ function kayitYaz(kayitlar) {
 
 function hucreGuncelle({ tarih, isletme_id, kategori_id, alan, deger }) {
   if (!ALANLAR.includes(alan)) throw new Error('Geçersiz alan: ' + alan);
+  const bekleyen = TUM_ALANLAR.includes(alan) && deger ? alan + '_bekliyor' : null;
   db.run(
     `INSERT INTO kayit (tarih, isletme_id, kategori_id, ${alan})
      VALUES (:tarih, :isletme_id, :kategori_id, :deger)
      ON CONFLICT(tarih, isletme_id, kategori_id) DO UPDATE SET
-       ${alan} = :deger, guncelleme = datetime('now')`,
+       ${alan} = :deger,${bekleyen ? ` ${bekleyen} = 0,` : ''} guncelleme = datetime('now')`,
     {
       ':tarih': tarih, ':isletme_id': isletme_id,
       ':kategori_id': kategori_id, ':deger': deger ? 1 : 0,
@@ -291,11 +292,37 @@ function gunSil(tarih) {
   db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
 }
 
-function kategoriSifirla(tarih, kategoriId) {
+function kategoriSifirla(tarih, kategoriId, genislik = 4) {
+  const temizlenecek = otomatikAlanlar(genislik === 2 ? 2 : 4);
   db.run(
-    `DELETE FROM kayit WHERE tarih = :t AND kategori_id = :k`,
+    `UPDATE kayit SET ${temizlenecek.map((a) => `${a} = 0`).join(', ')}
+     WHERE tarih = :t AND kategori_id = :k`,
     { ':t': tarih, ':k': kategoriId }
   );
+  db.run(
+    `DELETE FROM kayit WHERE tarih = :t AND kategori_id = :k
+       AND ${ALANLAR.map((a) => `${a} = 0`).join(' AND ')}
+       AND (aciklama IS NULL OR aciklama = '')`,
+    { ':t': tarih, ':k': kategoriId }
+  );
+}
+
+function otomatikIsaretle(tarih, kategoriId, isletmeIdler, genislik) {
+  const alanListesi = otomatikAlanlar(genislik === 2 ? 2 : 4);
+  const st = db.prepare(
+    `INSERT INTO kayit (tarih, isletme_id, kategori_id, ${alanListesi.join(', ')})
+     VALUES (:t, :i, :k, ${alanListesi.map(() => '1').join(', ')})
+     ON CONFLICT(tarih, isletme_id, kategori_id) DO UPDATE SET
+       ${alanListesi.map((a) => `${a} = 1`).join(', ')},
+       guncelleme = datetime('now')`
+  );
+  let n = 0;
+  for (const id of isletmeIdler) {
+    st.run({ ':t': tarih, ':i': id, ':k': kategoriId });
+    n++;
+  }
+  st.finalize();
+  return n;
 }
 
 function eslesmeler() {
@@ -433,7 +460,7 @@ module.exports = {
   isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
   isletmeEkle, isletmeSil, isletmeSirala, isletmeTasi, isletmeSiralaAdlar,
   gunler, aylar, gunVerisi, ayVerisi,
-  kayitYaz, hucreGuncelle, gunKategoriAc, gunSil, kategoriSifirla,
+  kayitYaz, hucreGuncelle, gunKategoriAc, gunSil, kategoriSifirla, otomatikIsaretle,
   eslesmeler, eslesmeEkle, eslesmeSil, eslesmeleriDisaAktar, eslesmeleriIceAktar,
   onerileriYaz, oneriler, logYaz, loglar, ozet,
 };

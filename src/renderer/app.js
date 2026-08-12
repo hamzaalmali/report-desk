@@ -506,6 +506,7 @@ async function hucreTikla(hucre) {
       tarih: D.tarih, isletme_id, kategori_id, alan, deger: yeni ? 1 : 0,
     }));
     hucre.classList.toggle('isaretli', yeni);
+    hucre.classList.toggle('bekliyor', !!kayit[alan + '_bekliyor']);
     hucre.textContent = yeni ? 'X' : '';
     if (!D.harita.has(isletme_id)) D.harita.set(isletme_id, new Map());
     const kat = D.kategoriler.find((k) => k.id === kategori_id);
@@ -694,6 +695,7 @@ async function sayfaAktar() {
             <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
               <input type="checkbox" id="uzerineYaz" checked class="size-4 accent-[#3ecf8e]" />
               Aynı gün varsa okunan kategorileri sıfırla
+              <span class="text-fg-3">— elle girdikleriniz korunur</span>
             </label>
             <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
               <input type="checkbox" id="yeniIsletme" ${bosMu ? 'checked' : ''} class="size-4 accent-[#3ecf8e]" />
@@ -816,6 +818,22 @@ function gunSonucuCiz(r, ix) {
         <div class="space-y-1 font-mono text-[11.5px] text-fg-2">
           ${r.satirlar.map((s) => `<div>${kacar(s)}</div>`).join('')}
         </div>
+        ${(r.eksikRaporlar || []).length ? `
+          <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
+            ${svg('uyari', 'inline size-3.5 -mt-0.5')} Bu aktarımda
+            <b>${r.eksikRaporlar.map((k) => kacar(k.ad)).join(', ')}</b>
+            raporu hiç görülmedi — bu kategoriler işaretlenmedi.
+            <div class="mt-1 text-fg-3">
+              Dosyayı seçmemiş olabilirsiniz ya da sayfa adı değişmiş olabilir.
+            </div>
+            ${(r.atlananSayfalar || []).length ? `
+              <details class="mt-1.5">
+                <summary class="cursor-pointer text-fg-3">Tanınmayan sayfalar</summary>
+                <div class="mt-1 space-y-0.5 font-mono text-[11px] text-fg-3">
+                  ${r.atlananSayfalar.map((s) => `<div>${kacar(s)}</div>`).join('')}
+                </div>
+              </details>` : ''}
+          </div>` : ''}
         ${r.oneriAdet ? `
           <div class="rounded-md border border-warn/40 bg-warn/10 p-3 text-[12px]">
             ${svg('uyari', 'inline size-3.5 -mt-0.5')} İL-İLÇE raporunda <b>${r.oneriAdet}</b> kayıt var —

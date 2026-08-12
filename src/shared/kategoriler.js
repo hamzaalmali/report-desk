@@ -47,6 +47,13 @@ function alanlar(genislik) {
   return genislik === 4 ? ALANLAR_4 : ALANLAR_2;
 }
 
+const OTOMATIK_ALANLAR_4 = ['ariza_var', 'donus_saglandi_bekliyor'];
+const OTOMATIK_ALANLAR_2 = ['tutanak_gerekli', 'tutanak_eklendi_bekliyor'];
+
+function otomatikAlanlar(genislik) {
+  return genislik === 4 ? OTOMATIK_ALANLAR_4 : OTOMATIK_ALANLAR_2;
+}
+
 const ALAN_BASLIK = {
   ariza_var: 'ARIZASI VAR MI?',
   donus_saglandi: 'DÖNÜŞ SAĞLANDI MI?',
@@ -56,4 +63,6 @@ const ALAN_BASLIK = {
 
 const TUM_ALANLAR = ALANLAR_4;
 
-module.exports = { KATEGORILER, kategoriBul, alanlar, ALAN_BASLIK, TUM_ALANLAR, KOD_ILE };
+module.exports = {
+  KATEGORILER, kategoriBul, alanlar, otomatikAlanlar, ALAN_BASLIK, TUM_ALANLAR, KOD_ILE,
+};

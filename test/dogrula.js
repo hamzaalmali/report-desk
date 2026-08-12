@@ -9,7 +9,7 @@ const path = require('node:path');
 const db = require('../src/main/db/db');
 const { genisTabloOku } = require('../src/main/import/genisTablo');
 const { gecmisiAktar } = require('../src/main/import/gecmisAktar');
-const { gunlukAktar } = require('../src/main/import/gunlukAktar');
+const { gunlukAktar, raporBul } = require('../src/main/import/gunlukAktar');
 const { aylikDisaAktar } = require('../src/main/export/excelDisaAktar');
 
 const KOK = process.argv[3] || path.join(__dirname, '..', '..');
@@ -150,6 +150,50 @@ async function main() {
     } else {
       kontrol('eşleşmeyen değer yok', true);
     }
+  }
+
+  console.log('\nSayfa adı tanıma');
+  kontrol('OSOS sayfaları ek/eksik kelimeyle de tanınır',
+    (raporBul('BİNA TİPİ OSOS KONTROL') || {}).kategori === 'BINA_TIPI_OSOS'
+    && (raporBul('OSOS BAĞLANTI İHBAR İNCELEME') || {}).kategori === 'OSOS_BAGLANTI');
+  kontrol('rapor olmayan sayfalar tanınmaz',
+    ['Rekortmen', '1000 Abone ve Üzeri', '6 Saat ve Üzeri'].every((s) => raporBul(s) === null));
+
+  console.log('\nElle girilenler aktarımda korunuyor');
+  if (gunlukDosyalar.length) {
+    const t = (await gunlukAktar(gunlukDosyalar)).gunler[0].tarih;
+    const kat = db.kategoriHaritasi();
+    const isl = db.isletmeler();
+    const oku = (kod, id, alan) => {
+      const s = db.gunVerisi(t).satirlar.find((x) => x.kategori_kod === kod && x.isletme_id === id);
+      return s ? s[alan] : null;
+    };
+    db.hucreGuncelle({ tarih: t, isletme_id: isl[0].id, kategori_id: kat.get('IL_ILCE').id, alan: 'tutanak_gerekli', deger: 1 });
+    db.hucreGuncelle({ tarih: t, isletme_id: isl[3].id, kategori_id: kat.get('BINA_TIPI_OSOS').id, alan: 'donus_saglandi', deger: 1 });
+    db.hucreGuncelle({ tarih: t, isletme_id: isl[0].id, kategori_id: kat.get('SCADA_TM').id, alan: 'tutanak_gerekli', deger: 1 });
+
+    await gunlukAktar(gunlukDosyalar);
+    kontrol('İL-İLÇE elle işareti yeniden aktarımda silinmiyor',
+      oku('IL_ILCE', isl[0].id, 'tutanak_gerekli') === 1);
+    kontrol('otomatik kategorinin elle sütunu korunuyor',
+      oku('BINA_TIPI_OSOS', isl[3].id, 'donus_saglandi') === 1);
+    kontrol('raporu olmayan kategoriye dokunulmuyor',
+      oku('SCADA_TM', isl[0].id, 'tutanak_gerekli') === 1);
+    kontrol('otomatik işaret yine de yeniden yazılıyor',
+      oku('BINA_TIPI_OSOS', isl[3].id, 'ariza_var') === 1);
+
+    const osos = gunlukDosyalar.filter((d) => /osos/i.test(d));
+    if (osos.length) {
+      const kismi = (await gunlukAktar(osos)).gunler[0];
+      kontrol('eksik kalan raporlar bildiriliyor',
+        kismi.eksikRaporlar.length === 4
+        && !kismi.eksikRaporlar.some((e) => e.kod.startsWith('OSOS') || e.kod === 'BINA_TIPI_OSOS'),
+        kismi.eksikRaporlar.map((e) => e.kod).join(', '));
+      kontrol('kısmi aktarım seçilmeyen kategorileri silmiyor',
+        oku('DURUM_KODU', isl[3].id, 'ariza_var') !== null);
+    }
+  } else {
+    console.log('  ! günlük rapor dosyası yok, atlandı.');
   }
 
   console.log('\nÇoklu gün aktarımı');

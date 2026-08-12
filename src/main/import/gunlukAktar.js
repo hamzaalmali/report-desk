@@ -6,6 +6,7 @@ const path = require('node:path');
 const ExcelJS = require('exceljs');
 const db = require('../db/db');
 const { key, enYakin } = require('../../shared/tr');
+const { KOD_ILE } = require('../../shared/kategoriler');
 const { hucreMetni, isoTarih } = require('./genisTablo');
 
 const RAPORLAR = [
@@ -34,9 +35,16 @@ const RAPORLAR = [
 
 function raporBul(sayfaAdi) {
   const k = key(sayfaAdi);
+  if (!k) return null;
   for (const r of RAPORLAR) {
     if (r.sayfa && key(r.sayfa) === k) return r;
     if (r.sayfaOnEk && k.startsWith(key(r.sayfaOnEk))) return r;
+  }
+  for (const r of RAPORLAR) {
+    if (!r.sayfa) continue;
+    const a = key(r.sayfa);
+    if (k.startsWith(a)) return r;
+    if (k.length >= 6 && a.startsWith(k)) return r;
   }
   return null;
 }
@@ -208,7 +216,9 @@ function ilIlceTara(ws, tablo, gunluk) {
 }
 
 async function birGunAktar(dosyalar, tarih, secenekler = {}) {
-  const gunluk = { satirlar: [], uyarilar: [], eslesmez: new Map(), taninmayan: [] };
+  const gunluk = {
+    satirlar: [], uyarilar: [], eslesmez: new Map(), taninmayan: [], atlananSayfalar: [],
+  };
   const tablo = eslesmeTablosu();
   const katMap = db.kategoriHaritasi();
 
@@ -226,9 +236,10 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
     }
 
     let taninan = false;
+    const atlanan = [];
     for (const ws of wb.worksheets) {
       const rapor = raporBul(ws.name);
-      if (!rapor) continue;
+      if (!rapor) { atlanan.push(ws.name); continue; }
       taninan = true;
 
       if (rapor.tip === 'ililce') {
@@ -248,6 +259,9 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       }
     }
     if (!taninan) gunluk.taninmayan.push(path.basename(dosya));
+    if (atlanan.length) {
+      gunluk.atlananSayfalar.push(`${path.basename(dosya)} → ${atlanan.join(', ')}`);
+    }
   }
 
   if (bulunanlar.size === 0) {
@@ -292,20 +306,12 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       if (!kat) continue;
       acilan.push(kat.id);
 
-      if (secenekler.uzerineYaz !== false) db.kategoriSifirla(tarih, kat.id);
-
       if (!kat.otomatik) { yaziliKategoriler.push({ kod, adet: 0, otomatik: false }); continue; }
 
-      const kayitlar = [...set].map((isletme_id) => ({
-        tarih,
-        isletme_id,
-        kategori_id: kat.id,
-        ...(kat.genislik === 4
-          ? { ariza_var: 1, donus_saglandi_bekliyor: 1 }
-          : { tutanak_gerekli: 1, tutanak_eklendi_bekliyor: 1 }),
-      }));
-      db.kayitYaz(kayitlar);
-      yaziliKategoriler.push({ kod, adet: kayitlar.length, otomatik: true });
+      if (secenekler.uzerineYaz !== false) db.kategoriSifirla(tarih, kat.id, kat.genislik);
+
+      const adet = db.otomatikIsaretle(tarih, kat.id, [...set], kat.genislik);
+      yaziliKategoriler.push({ kod, adet, otomatik: true });
     }
     db.gunKategoriAc(tarih, acilan);
     if (oneriler) db.onerileriYaz(tarih, oneriler);
@@ -324,10 +330,16 @@ async function birGunAktar(dosyalar, tarih, secenekler = {}) {
       };
     });
 
+  const eksikRaporlar = RAPORLAR
+    .filter((r) => !bulunanlar.has(r.kategori))
+    .map((r) => ({ kod: r.kategori, ad: (KOD_ILE.get(r.kategori) || {}).ad || r.kategori }));
+
   return {
     tarih,
     dosyalar: dosyalar.map((d) => path.basename(d)),
     kategoriler: yaziliKategoriler,
+    eksikRaporlar,
+    atlananSayfalar: gunluk.atlananSayfalar,
     isaretToplam: yaziliKategoriler.reduce((s, k) => s + k.adet, 0),
     satirlar: gunluk.satirlar,
     uyarilar: gunluk.uyarilar,
@@ -370,6 +382,7 @@ async function gunlukAktar(dosyalar, secenekler = {}) {
         hata: e.message,
         kategoriler: [], isaretToplam: 0, satirlar: [], uyarilar: [],
         eslesmez: [], eklenenIsletmeler: [], taninmayan: [], oneriAdet: 0,
+        eksikRaporlar: [], atlananSayfalar: [],
       });
     }
   }
