@@ -174,6 +174,50 @@ async function main() {
     }
   }
 
+  console.log('\nExcel başlıkları birleşik');
+  if (gunlukDosyalar.length) {
+    const ay = db.aylar()[0].ay;
+    const yol = path.join(gecici, 'baslik.xlsx');
+    await aylikDisaAktar(ay, yol);
+    const wb = new (require('exceljs').Workbook)();
+    await wb.xlsx.readFile(yol);
+    const ws = wb.worksheets[0];
+    const birlesik = new Set(ws.model.merges || []);
+
+    kontrol('A2:A3 birleşik ve tek İŞLETME yazıyor',
+      birlesik.has('A2:A3') && ws.getCell(2, 1).value === 'İŞLETME',
+      [...birlesik].join(' '));
+
+    const master = (r, c) => {
+      const h = ws.getCell(r, c);
+      return (h.master || h).address === h.address;
+    };
+    const kats = db.kategoriler();
+    let hepsi = true, ayrinti = '';
+    for (let c = 2; c <= ws.columnCount; c++) {
+      if (!master(2, c)) continue;
+      const ad = String(ws.getCell(2, c).value || '');
+      const kat = kats.find((k) => k.ad === ad);
+      if (!kat) { hepsi = false; ayrinti = `bilinmeyen başlık: ${ad}`; break; }
+      const son = c + kat.genislik - 1;
+      if (kat.genislik > 1 && !birlesik.has(`${ws.getCell(2, c).address}:${ws.getCell(2, son).address}`)) {
+        hepsi = false; ayrinti = `${ad} birleşik değil`; break;
+      }
+      c = son;
+    }
+    kontrol('kategori başlıkları sütunları boyunca birleşik', hepsi, ayrinti);
+    kontrol('başlık ortalanmış',
+      ws.getCell(2, 1).alignment.horizontal === 'center'
+      && ws.getCell(2, 2).alignment.horizontal === 'center');
+
+    const geri = await genisTabloOku(yol);
+    kontrol('birleşik başlıklı dosya sorunsuz geri okunuyor',
+      geri.uyarilar.length === 0 && geri.kategoriler.length > 0,
+      geri.uyarilar.join(' | '));
+  } else {
+    console.log('  ! günlük rapor dosyası yok, atlandı.');
+  }
+
   console.log('\nRapor tanıma');
   kontrol('OSOS sayfaları ek/eksik kelimeyle de tanınır',
     (raporBul('BİNA TİPİ OSOS KONTROL') || {}).kategori === 'BINA_TIPI_OSOS'

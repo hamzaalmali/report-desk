@@ -80,12 +80,13 @@ async function aylikDisaAktar(ay, yol) {
   ws.mergeCells(1, 1, 1, 1);
   for (const r of [2, 3]) {
     const c = ws.getCell(r, 1);
-    c.value = 'İŞLETME';
     c.font = { bold: true, size: 10 };
     c.alignment = { horizontal: 'center', vertical: 'middle' };
     c.fill = dolgu('FFBFBFBF');
     c.border = kenarlik();
   }
+  ws.getCell(2, 1).value = 'İŞLETME';
+  ws.mergeCells(2, 1, 3, 1);
   h1.border = kenarlik();
 
   isletmeler.forEach((isl, i) => {
@@ -112,7 +113,7 @@ async function aylikDisaAktar(ay, yol) {
         ws.getColumn(c).width = 9;
 
         const kh = ws.getCell(2, c);
-        kh.value = kat.ad;
+        if (ofs === 0) kh.value = kat.ad;
         kh.font = { bold: true, size: 9 };
         kh.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         kh.fill = dolgu(KATEGORI_RENK[kod] || 'FFEFEFEF');
@@ -136,6 +137,7 @@ async function aylikDisaAktar(ay, yol) {
         });
       });
 
+      if (kat.genislik > 1) ws.mergeCells(2, sutun, 2, sutun + kat.genislik - 1);
       sutun += kat.genislik;
     }
 
