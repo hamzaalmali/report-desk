@@ -451,8 +451,13 @@ async function gunIzgarasiCiz() {
       }).join('');
     }).join('');
     return `<tr>
-      <td class="sticky-col cursor-pointer px-3 py-0 text-[12px] font-medium hover:text-brand"
-          data-form="${isl.id}" style="height:26px" title="Form görünümünde aç">${kacar(isl.ad)}</td>
+      <td class="sticky-col group cursor-pointer px-3 py-0 text-[12px] font-medium hover:text-brand"
+          data-form="${isl.id}" style="height:26px" title="Form görünümünde aç">
+        <span class="flex items-center justify-between gap-2">
+          <span>${kacar(isl.ad)}</span>
+          ${svg('sag', 'size-3.5 shrink-0 text-fg-3 opacity-40 group-hover:text-brand group-hover:opacity-100')}
+        </span>
+      </td>
       ${hucreler}</tr>`;
   }).join('');
 
@@ -460,7 +465,9 @@ async function gunIzgarasiCiz() {
     <div class="mb-3 flex shrink-0 items-center justify-between">
       <div class="flex items-center gap-2 text-[12.5px]">
         <span class="chip border-brand-2/50 bg-brand-dim text-brand">${gunAdi(D.tarih)}, ${tarihYaz(D.tarih)}</span>
-        <span class="text-fg-3">Hücreye tıklayarak işaretleyin · işletme adına tıklayın → form</span>
+        <span class="text-fg-3">Hücreye tıklayarak işaretleyin · işletme adına tıklayın
+          ${svg('sag', 'inline size-3 -mt-0.5')} o işletmenin bütün kategorileri sağda
+          form olarak açılır</span>
       </div>
       <div class="flex items-center gap-3 text-[11px] text-fg-3">
         <span class="flex items-center gap-1.5"><i class="inline-block size-3 rounded-sm bg-brand-dim"></i> İşaretli</span>
