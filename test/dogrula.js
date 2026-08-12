@@ -184,8 +184,9 @@ async function main() {
     const ws = wb.worksheets[0];
     const birlesik = new Set(ws.model.merges || []);
 
-    kontrol('A2:A3 birleşik ve tek İŞLETME yazıyor',
-      birlesik.has('A2:A3') && ws.getCell(2, 1).value === 'İŞLETME',
+    kontrol('A1:A3 birleşik ve tek İŞLETME yazıyor',
+      birlesik.has('A1:A3') && ws.getCell(1, 1).value === 'İŞLETME'
+      && !ws.getCell(2, 1).model.value && !ws.getCell(3, 1).model.value,
       [...birlesik].join(' '));
 
     const master = (r, c) => {
@@ -207,7 +208,8 @@ async function main() {
     }
     kontrol('kategori başlıkları sütunları boyunca birleşik', hepsi, ayrinti);
     kontrol('başlık ortalanmış',
-      ws.getCell(2, 1).alignment.horizontal === 'center'
+      ws.getCell(1, 1).alignment.horizontal === 'center'
+      && ws.getCell(1, 1).alignment.vertical === 'middle'
       && ws.getCell(2, 2).alignment.horizontal === 'center');
 
     const geri = await genisTabloOku(yol);

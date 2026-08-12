@@ -76,18 +76,15 @@ async function aylikDisaAktar(ay, yol) {
   });
 
   ws.getColumn(1).width = 16;
-  const h1 = ws.getCell(1, 1);
-  ws.mergeCells(1, 1, 1, 1);
-  for (const r of [2, 3]) {
+  for (const r of [1, 2, 3]) {
     const c = ws.getCell(r, 1);
     c.font = { bold: true, size: 10 };
     c.alignment = { horizontal: 'center', vertical: 'middle' };
     c.fill = dolgu('FFBFBFBF');
     c.border = kenarlik();
   }
-  ws.getCell(2, 1).value = 'İŞLETME';
-  ws.mergeCells(2, 1, 3, 1);
-  h1.border = kenarlik();
+  ws.getCell(1, 1).value = 'İŞLETME';
+  ws.mergeCells(1, 1, 3, 1);
 
   isletmeler.forEach((isl, i) => {
     const c = ws.getCell(4 + i, 1);
