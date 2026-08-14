@@ -139,6 +139,42 @@ async function baslat() {
 
 const KOMUT_BEKLEME = 15000;
 const kendiYanitlarimiz = new Set();
+const bekleyenSorular = new Map();
+
+function yanitiIsaretle(gonderim) {
+  const kimlik = gonderim && gonderim.key && gonderim.key.id;
+  if (!kimlik) return;
+  kendiYanitlarimiz.add(kimlik);
+  if (kendiYanitlarimiz.size > 50) {
+    kendiYanitlarimiz.delete(kendiYanitlarimiz.values().next().value);
+  }
+}
+
+async function gonder(sohbet, metin) {
+  const s = bagliMi();
+  yanitiIsaretle(await s.sendMessage(sohbet, { text: String(metin) }));
+  return true;
+}
+
+function soruyuDusur(numara, hata) {
+  const b = bekleyenSorular.get(numara);
+  if (!b) return;
+  clearTimeout(b.sayac);
+  bekleyenSorular.delete(numara);
+  b.red(hata);
+}
+
+async function sor(sohbet, numara, metin, sureMs = 180000) {
+  soruyuDusur(numara, new Error('Yeni bir soru sorulunca bu soru düştü.'));
+  await gonder(sohbet, metin);
+  return new Promise((coz, red) => {
+    const sayac = setTimeout(() => {
+      bekleyenSorular.delete(numara);
+      red(new Error('Yanıt gelmedi, süre doldu.'));
+    }, sureMs);
+    bekleyenSorular.set(numara, { coz, red, sayac, sohbet });
+  });
+}
 
 function mesajMetni(m) {
   const i = m.message || {};
@@ -209,25 +245,35 @@ async function gelenMesaj(m) {
 
   if (!metin || !gonderen) return;
 
+  const bekleyen = bekleyenSorular.get(gonderen);
+  if (bekleyen) {
+    clearTimeout(bekleyen.sayac);
+    bekleyenSorular.delete(gonderen);
+    gunluk(`WhatsApp yanıtı alındı: ${gonderen} → ${metin.length} karakter`);
+    bekleyen.coz(metin);
+    return;
+  }
+
   const simdi = Date.now();
   if (simdi - (sonKomut.get(gonderen) || 0) < KOMUT_BEKLEME) {
     gunluk(`WhatsApp mesaj atlandı: ${gonderen} için bekleme süresi dolmadı`);
     return;
   }
 
-  const yanit = await komutIsleyici({ gonderen, metin, sohbet, grupMu: String(sohbet).endsWith('@g.us') });
-  if (!yanit) return;
-
   sonKomut.set(gonderen, simdi);
+  const yanit = await komutIsleyici({
+    gonderen,
+    metin,
+    sohbet,
+    grupMu: String(sohbet).endsWith('@g.us'),
+    gonder: (t) => gonder(sohbet, t),
+    sor: (t, sure) => sor(sohbet, gonderen, t, sure),
+  });
+  if (!yanit) { sonKomut.delete(gonderen); return; }
+
+  sonKomut.set(gonderen, Date.now());
   try {
-    const g = await sock.sendMessage(sohbet, { text: yanit }, { quoted: m });
-    const kimlik = g && g.key && g.key.id;
-    if (kimlik) {
-      kendiYanitlarimiz.add(kimlik);
-      if (kendiYanitlarimiz.size > 50) {
-        kendiYanitlarimiz.delete(kendiYanitlarimiz.values().next().value);
-      }
-    }
+    yanitiIsaretle(await sock.sendMessage(sohbet, { text: yanit }, { quoted: m }));
   } catch { }
 }
 
@@ -324,5 +370,5 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
   gruplariGetir, belgeGonder, topluBelgeGonder,
-  gonderenNumara, mesajMetni,
+  gonderenNumara, mesajMetni, gonder, sor,
 };

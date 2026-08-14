@@ -68,6 +68,18 @@ contextBridge.exposeInMainWorld('api', {
   waGonder: (istek) => cagir('waGonder', istek),
   waGonderimDinle: (fn) => { ipcRenderer.on('waGonderim', (_o, veri) => fn(veri)); },
 
+  portalAyar: () => cagir('portalAyar'),
+  portalAyarYaz: (gelen) => cagir('portalAyarYaz', gelen),
+  portalHesaplar: () => cagir('portalHesaplar'),
+  portalHesapYaz: (gelen) => cagir('portalHesapYaz', gelen),
+  portalHesapSil: (id) => cagir('portalHesapSil', id),
+  portalCalistir: (numara) => cagir('portalCalistir', numara),
+  portalDurum: () => cagir('portalDurum'),
+  portalDurdur: () => cagir('portalDurdur'),
+  portalKlasorAc: () => cagir('portalKlasorAc'),
+  portalOnayVer: (kod) => cagir('portalOnayVer', kod),
+  portalDinle: (fn) => { ipcRenderer.on('portalIlerleme', (_o, veri) => fn(veri)); },
+
   kilitDurum: () => cagir('kilitDurum'),
   kilitTazele: () => cagir('kilitTazele'),
 

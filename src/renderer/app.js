@@ -1568,6 +1568,11 @@ function waCiz(d) {
             17 ilçesinin Meteoroloji verisi çekilip aynı sohbete yanıt olarak gönderilir.
             Başka numaralara ve başka metinlere cevap verilmez.
           </div>
+          <div class="text-[12px] text-fg-2">
+            <b>“rapor gönder”</b> komutu ayrı çalışır: yalnızca <b>Ayarlar → Rapor portalı</b>
+            bölümünde kullanıcı adı ve şifresi tanımlı numaralar kullanabilir, grup
+            sohbetlerinde çalışmaz. Onay kodu aynı sohbetten sorulur.
+          </div>
           <div class="flex items-end gap-2">
             <label class="flex flex-1 flex-col gap-1">
               <span class="text-[11px] text-fg-3">İzinli numaralar (virgülle, ülke koduyla)</span>
@@ -1777,11 +1782,298 @@ function waGonderBagla(bagli) {
   };
 }
 
+function portalKarti(ayar, hesaplar) {
+  const alan = (id, etiket, deger, tur = 'text', ipucu = '') => `
+    <label class="flex flex-col gap-1">
+      <span class="text-[11px] text-fg-3">${etiket}</span>
+      <input type="${tur}" id="${id}" class="input" value="${kacar(deger == null ? '' : deger)}"
+             placeholder="${kacar(ipucu)}" />
+    </label>`;
+
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="font-medium">Rapor portalı</div>
+          <div class="text-[11.5px] text-fg-3">
+            Tanımlı numaralardan “rapor gönder” yazılınca portala girilip rapor indirilir</div>
+        </div>
+        <span class="chip border-line-2 text-fg-3" id="portalRozet">
+          ${hesaplar.length} numara</span>
+      </div>
+
+      <div class="grid gap-3 border-b border-line p-5 md:grid-cols-2">
+        ${alan('pGiris', 'Giriş sayfası adresi', ayar.girisUrl, 'text', 'https://…/Login.aspx')}
+        ${alan('pAna', 'Ana sayfa adresi', ayar.anaUrl, 'text', 'https://…/default.aspx')}
+        ${alan('pRapor', 'Rapor adı (listede yazdığı gibi)', ayar.raporAdi, 'text', '')}
+        ${alan('pSaat', 'Saat', ayar.saat, 'text', '01:00')}
+        ${alan('pGunGeri', 'Başlangıç kaç gün geriden', ayar.gunGeri, 'number', '1')}
+        ${alan('pOnaySn', 'Onay kodu bekleme (saniye)', ayar.onaySn, 'number', '180')}
+        <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+          <input type="checkbox" id="pGorunur" class="size-4 accent-[#3ecf8e]"
+                 ${ayar.gorunur ? 'checked' : ''} /> Tarayıcı penceresi görünsün
+        </label>
+        <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+          <input type="checkbox" id="pKapat" class="size-4 accent-[#3ecf8e]"
+                 ${ayar.kapat ? 'checked' : ''} /> İş bitince pencere kapansın
+        </label>
+        <details class="md:col-span-2">
+          <summary class="cursor-pointer text-[11.5px] text-fg-3">Menü yolları (gelişmiş)</summary>
+          <div class="mt-2 grid gap-3 md:grid-cols-2">
+            ${alan('pMenu', 'Raporlar menüsü XPath', ayar.menuXpath)}
+            ${alan('pAltMenu', 'Raporlar alt menüsü XPath', ayar.altMenuXpath)}
+          </div>
+        </details>
+        <div class="flex items-center gap-2 md:col-span-2">
+          <button class="btn btn-brand" id="pAyarKaydet">Ayarları kaydet</button>
+          <button class="btn" id="pKlasor">Kayıt klasörünü aç</button>
+          <span class="text-[11.5px] ${ayar.kasaVar ? 'text-fg-3' : 'text-warn'}">
+            ${ayar.kasaVar
+              ? 'Şifreler bu bilgisayarın kasasında şifrelenerek saklanır.'
+              : 'Bu bilgisayarda işletim sistemi kasası yok — şifreler düz metin saklanır.'}
+          </span>
+        </div>
+      </div>
+
+      <div class="border-b border-line">
+        <table class="tbl">
+          <thead><tr>
+            <th class="w-40">Numara</th><th>Ad</th><th>Kullanıcı adı</th>
+            <th>Yeni şifre</th><th class="w-16">Açık</th><th class="w-24"></th>
+          </tr></thead>
+          <tbody id="pHesapGovde"></tbody>
+        </table>
+      </div>
+
+      <div class="space-y-3 p-5">
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="pKim" class="input" style="min-width:180px"></select>
+          <button class="btn btn-brand" id="pCalistir">Şimdi çalıştır</button>
+          <button class="btn hidden" id="pDurdur">Durdur</button>
+          <span class="text-[11.5px] text-fg-3">
+            Tarayıcı açılır, adımlar aşağıda görünür; her adımın HTML'i ve ekran görüntüsü kaydedilir.</span>
+        </div>
+        <div id="pOnayKutu" class="hidden rounded-md border border-warn/50 bg-warn/10 p-3">
+          <div class="mb-2 text-[12.5px]" id="pOnayMesaj">Onay kodunu girin</div>
+          <div class="flex gap-2">
+            <input type="text" id="pOnayKod" class="input w-40" placeholder="123456" />
+            <button class="btn btn-brand" id="pOnayGonder">Gönder</button>
+          </div>
+        </div>
+        <div id="pIlerleme"></div>
+      </div>
+    </div>`;
+}
+
+function portalHesapSatirlari(hesaplar) {
+  const govde = el('pHesapGovde');
+  if (!govde) return;
+  const satir = (h) => `
+    <tr data-hesap="${h ? h.id : 'yeni'}">
+      <td><input class="input w-full" data-a="numara" value="${kacar(h ? h.numara : '')}"
+                 placeholder="905xxxxxxxxx" /></td>
+      <td><input class="input w-full" data-a="ad" value="${kacar(h ? h.ad : '')}"
+                 placeholder="Kim" /></td>
+      <td><input class="input w-full" data-a="kullanici" value="${kacar(h ? h.kullanici : '')}" /></td>
+      <td><input class="input w-full" type="password" data-a="sifre" autocomplete="new-password"
+                 placeholder="${h && h.sifreVar ? '•••••• kayıtlı' : 'şifre'}" /></td>
+      <td class="text-center"><input type="checkbox" class="size-4 accent-[#3ecf8e]" data-a="aktif"
+                 ${!h || h.aktif ? 'checked' : ''} /></td>
+      <td class="whitespace-nowrap text-right">
+        <button class="btn btn-sm btn-brand" data-pkaydet="${h ? h.id : 'yeni'}">
+          ${h ? 'Kaydet' : 'Ekle'}</button>
+        ${h ? `<button class="btn-ghost btn btn-sm" data-psil="${h.id}"
+                 title="Sil">${svg('sil', 'size-3.5')}</button>` : ''}
+      </td>
+    </tr>`;
+
+  govde.innerHTML = hesaplar.map(satir).join('') + satir(null);
+
+  const oku = (tr) => {
+    const al = (a) => tr.querySelector(`[data-a="${a}"]`);
+    return {
+      numara: al('numara').value.trim(),
+      ad: al('ad').value.trim(),
+      kullanici: al('kullanici').value.trim(),
+      sifre: al('sifre').value,
+      aktif: al('aktif').checked,
+    };
+  };
+
+  govde.querySelectorAll('[data-pkaydet]').forEach((b) => {
+    b.onclick = async () => {
+      const tr = b.closest('tr');
+      const veri = oku(tr);
+      if (!veri.numara) return bildir('Numara boş olamaz.', 'hata');
+      const id = b.dataset.pkaydet === 'yeni' ? null : Number(b.dataset.pkaydet);
+      b.disabled = true;
+      try {
+        const liste = await cagir(api.portalHesapYaz({ id, ...veri }));
+        D.portalHesaplar = liste;
+        portalHesapSatirlari(liste);
+        portalKimDoldur(liste);
+        bildir('Kaydedildi.', 'basari');
+      } catch (e) { bildir(kacar(e.message), 'hata'); b.disabled = false; }
+    };
+  });
+
+  govde.querySelectorAll('[data-psil]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('Bu numara ve kayıtlı bilgileri silinecek. Emin misiniz?')) return;
+      try {
+        const liste = await cagir(api.portalHesapSil(Number(b.dataset.psil)));
+        D.portalHesaplar = liste;
+        portalHesapSatirlari(liste);
+        portalKimDoldur(liste);
+        bildir('Silindi.', 'basari');
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  });
+}
+
+function portalKimDoldur(hesaplar) {
+  const s = el('pKim');
+  if (!s) return;
+  const secili = s.value;
+  const acik = hesaplar.filter((h) => h.aktif && h.kullanici && h.sifreVar);
+  s.innerHTML = acik.length
+    ? acik.map((h) => `<option value="${kacar(h.numara)}">
+        ${kacar(h.ad || h.numara)} · ${kacar(h.kullanici)}</option>`).join('')
+    : '<option value="">— tanımlı hesap yok —</option>';
+  if (secili) s.value = secili;
+  const b = el('pCalistir');
+  if (b) b.disabled = !acik.length;
+  const r = el('portalRozet');
+  if (r) r.textContent = `${hesaplar.length} numara`;
+}
+
+function portalIlerlemeCiz() {
+  const kutu = el('pIlerleme');
+  if (!kutu) return;
+  const adimlar = D.portalAdimlar || [];
+  if (!adimlar.length) { kutu.innerHTML = ''; return; }
+  const simge = { calisiyor: '⏳', bitti: '✓', hata: '✗' };
+  const renk = { calisiyor: 'text-fg-2', bitti: 'text-brand', hata: 'text-danger' };
+  kutu.innerHTML = `
+    <div class="rounded-md border border-line bg-bg-200 p-3 text-[12px]">
+      ${adimlar.map((a) => `
+        <div class="flex items-start gap-2 py-0.5 ${renk[a.durum] || ''}">
+          <span class="w-4 shrink-0">${simge[a.durum] || '·'}</span>
+          <span class="min-w-0 flex-1">
+            ${kacar(a.ad)}
+            ${a.hata ? `<div class="text-[11.5px] text-danger">${kacar(a.hata)}</div>` : ''}
+            ${a.iz && a.iz.dosya
+              ? `<div class="font-mono text-[10.5px] text-fg-3">${kacar(a.iz.dosya)}</div>` : ''}
+          </span>
+        </div>`).join('')}
+    </div>`;
+}
+
+function portalDinleyiciKur() {
+  if (D.portalBagli) return;
+  D.portalBagli = true;
+  api.portalDinle((o) => {
+    if (o.tur === 'onay-istendi') {
+      const kutu = el('pOnayKutu');
+      if (kutu) {
+        kutu.classList.remove('hidden');
+        el('pOnayMesaj').textContent = (o.sonHata ? o.sonHata + ' ' : '')
+          + `Size gelen onay kodunu girin (${o.saniye} sn).`;
+        el('pOnayKod').value = '';
+        el('pOnayKod').focus();
+      }
+      return;
+    }
+    if (o.tur === 'onay-bitti') {
+      const kutu = el('pOnayKutu');
+      if (kutu) kutu.classList.add('hidden');
+      return;
+    }
+    if (!o.kod) return;
+    D.portalAdimlar = D.portalAdimlar || [];
+    const ix = D.portalAdimlar.findIndex((a) => a.kod === o.kod);
+    if (ix >= 0) D.portalAdimlar[ix] = o; else D.portalAdimlar.push(o);
+    portalIlerlemeCiz();
+  });
+}
+
+function portalBagla(ayar) {
+  portalDinleyiciKur();
+  portalHesapSatirlari(D.portalHesaplar || []);
+  portalKimDoldur(D.portalHesaplar || []);
+  portalIlerlemeCiz();
+
+  el('pAyarKaydet').onclick = async () => {
+    const b = el('pAyarKaydet');
+    b.disabled = true;
+    try {
+      const yeni = await cagir(api.portalAyarYaz({
+        girisUrl: el('pGiris').value,
+        anaUrl: el('pAna').value,
+        raporAdi: el('pRapor').value,
+        saat: el('pSaat').value,
+        gunGeri: el('pGunGeri').value,
+        onaySn: el('pOnaySn').value,
+        gorunur: el('pGorunur').checked,
+        kapat: el('pKapat').checked,
+        menuXpath: el('pMenu').value,
+        altMenuXpath: el('pAltMenu').value,
+      }));
+      el('pAna').value = yeni.anaUrl || '';
+      bildir('Portal ayarları kaydedildi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+    finally { b.disabled = false; }
+  };
+
+  el('pKlasor').onclick = async () => {
+    try { await cagir(api.portalKlasorAc()); }
+    catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('pOnayGonder').onclick = async () => {
+    const kod = el('pOnayKod').value.trim();
+    if (!kod) return;
+    try {
+      await cagir(api.portalOnayVer(kod));
+      el('pOnayKutu').classList.add('hidden');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+  el('pOnayKod').onkeydown = (o) => { if (o.key === 'Enter') el('pOnayGonder').click(); };
+
+  el('pDurdur').onclick = async () => {
+    try { await cagir(api.portalDurdur()); } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('pCalistir').onclick = async () => {
+    const numara = el('pKim').value;
+    if (!numara) return bildir('Önce kullanıcı adı ve şifresi girilmiş bir numara ekleyin.', 'hata');
+    if (!ayar.girisUrl || !ayar.raporAdi) {
+      return bildir('Önce giriş adresi ve rapor adını kaydedin.', 'hata');
+    }
+    const b = el('pCalistir');
+    b.disabled = true;
+    el('pDurdur').classList.remove('hidden');
+    D.portalAdimlar = [];
+    portalIlerlemeCiz();
+    try {
+      const r = await cagir(api.portalCalistir(numara));
+      bildir(`<b>Rapor indirildi.</b><br>${kacar(r.dosyaAdi || '')}`, 'basari');
+    } catch (e) {
+      bildir(kacar(e.message), 'hata');
+    } finally {
+      b.disabled = false;
+      el('pDurdur').classList.add('hidden');
+      el('pOnayKutu').classList.add('hidden');
+    }
+  };
+}
+
 async function sayfaAyarlar() {
-  const [surum, ozet, loglar, isletmeler, ortak] = await Promise.all([
+  const [surum, ozet, loglar, isletmeler, ortak, pAyar, pHesaplar] = await Promise.all([
     cagir(api.surum()), cagir(api.ozet()), cagir(api.loglar()), cagir(api.isletmeler()),
-    cagir(api.ortakDurum()),
+    cagir(api.ortakDurum()), cagir(api.portalAyar()), cagir(api.portalHesaplar()),
   ]);
+  D.portalHesaplar = pHesaplar;
 
   el('icerik').innerHTML = `
     <div class="min-h-0 flex-1 space-y-4 overflow-auto">
@@ -1855,6 +2147,8 @@ async function sayfaAyarlar() {
           </div>
         </div>
       </div>
+
+      ${portalKarti(pAyar, pHesaplar)}
 
       <div class="card overflow-hidden">
         <div class="card-head">
@@ -1933,6 +2227,7 @@ async function sayfaAyarlar() {
 
   el('vtAc').onclick = () => api.klasorAc(surum.vt);
   el('gunlukAc').onclick = () => api.gunluguAc();
+  portalBagla(pAyar);
 
   const ortakYaz = (d) => {
     const kutu = el('ortakDurum');

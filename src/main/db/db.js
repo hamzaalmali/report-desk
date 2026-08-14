@@ -733,6 +733,64 @@ function waSeciliGruplar() {
   return db.all('SELECT jid, ad FROM wa_grup WHERE secili = 1 ORDER BY ad');
 }
 
+function ayarOku(anahtar, varsayilan = null) {
+  const r = db.get('SELECT deger FROM ayar WHERE anahtar = :a', { ':a': anahtar });
+  return r && r.deger != null ? r.deger : varsayilan;
+}
+
+function ayarYaz(anahtar, deger) {
+  db.run('INSERT OR REPLACE INTO ayar (anahtar, deger) VALUES (:a, :d)',
+    { ':a': anahtar, ':d': deger == null ? null : String(deger) });
+  return deger;
+}
+
+function portalHesaplar() {
+  return db.all(
+    `SELECT id, numara, ad, kullanici, aktif,
+            CASE WHEN sifre = '' THEN 0 ELSE 1 END AS sifreVar, sifreli
+     FROM portal_hesap ORDER BY id`
+  );
+}
+
+function portalHesap(numara) {
+  return db.get('SELECT * FROM portal_hesap WHERE numara = :n', { ':n': String(numara || '') });
+}
+
+function portalHesapYaz({ id, numara, ad, kullanici, sifre, sifreli, aktif }) {
+  const mevcut = id ? db.get('SELECT * FROM portal_hesap WHERE id = :i', { ':i': id }) : null;
+  const yeniSifre = sifre == null ? (mevcut ? mevcut.sifre : '') : sifre;
+  const yeniSifreli = sifre == null ? (mevcut ? mevcut.sifreli : 0) : (sifreli ? 1 : 0);
+
+  if (mevcut) {
+    db.run(
+      `UPDATE portal_hesap SET numara = :n, ad = :ad, kullanici = :k, sifre = :s,
+              sifreli = :sl, aktif = :a, guncelleme = datetime('now') WHERE id = :i`,
+      {
+        ':i': id, ':n': numara, ':ad': ad || '', ':k': kullanici || '',
+        ':s': yeniSifre, ':sl': yeniSifreli, ':a': aktif ? 1 : 0,
+      }
+    );
+  } else {
+    db.run(
+      `INSERT INTO portal_hesap (numara, ad, kullanici, sifre, sifreli, aktif)
+       VALUES (:n, :ad, :k, :s, :sl, :a)
+       ON CONFLICT(numara) DO UPDATE SET
+         ad = excluded.ad, kullanici = excluded.kullanici, sifre = excluded.sifre,
+         sifreli = excluded.sifreli, aktif = excluded.aktif, guncelleme = datetime('now')`,
+      {
+        ':n': numara, ':ad': ad || '', ':k': kullanici || '',
+        ':s': yeniSifre, ':sl': yeniSifreli, ':a': aktif ? 1 : 0,
+      }
+    );
+  }
+  return portalHesaplar();
+}
+
+function portalHesapSil(id) {
+  db.run('DELETE FROM portal_hesap WHERE id = :i', { ':i': id });
+  return portalHesaplar();
+}
+
 function logYaz(tarih, tur, mesaj) {
   db.run('INSERT INTO islem_log (tarih, tur, mesaj) VALUES (:t, :tur, :m)', {
     ':t': tarih || null, ':tur': tur, ':m': mesaj,
@@ -803,4 +861,6 @@ module.exports = {
   vardiyaPersoneller, vardiyaPersonelEkle, vardiyaPersonelSil, vardiyaPersonelTasi,
   vardiyaAyVerisi, vardiyaAylar, vardiyaYaz, vardiyaTopluYaz, vardiyaAySil,
   waGruplar, waGruplariYaz, waGrupSec, waSeciliGruplar,
+  ayarOku, ayarYaz,
+  portalHesaplar, portalHesap, portalHesapYaz, portalHesapSil,
 };

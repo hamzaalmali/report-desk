@@ -10,6 +10,7 @@
     "css": "tailwindcss -i src/renderer/input.css -o src/renderer/styles.css --minify",
     "css:watch": "tailwindcss -i src/renderer/input.css -o src/renderer/styles.css --watch",
     "test": "node test/dogrula.js",
+    "test:portal": "electron test/portal-deneme.js",
     "dist": "npm run css && electron-builder --win --publish never",
     "release": "npm run css && electron-builder --win --publish always"
   },

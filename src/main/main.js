@@ -16,6 +16,9 @@ const komut = require('./whatsapp/komut');
 const mgm = require('./hava/mgm');
 const kilit = require('./kilit');
 const ortak = require('./ortak');
+const portal = require('./portal/portal');
+const portalAyar = require('./portal/ayar');
+const kasa = require('./portal/kasa');
 const senkron = require('./senkron/senkron');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
@@ -27,6 +30,7 @@ app.setName('report-desk');
 
 const VERI_DOSYASI = () => path.join(app.getPath('userData'), 'veri.sqlite');
 const GUNLUK_DOSYASI = () => path.join(app.getPath('userData'), 'baslangic.log');
+const PORTAL_KLASORU = () => path.join(app.getPath('userData'), 'portal-kayit');
 
 function kayit(mesaj) {
   const satir = `${new Date().toISOString()}  ${mesaj}`;
@@ -271,7 +275,12 @@ app.whenReady().then(() => {
       (d) => {
         if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
       },
-      komut.olustur({ izinliler: () => izinliNumaralar(), log: kayit }),
+      komut.olustur({
+        izinliler: () => izinliNumaralar(),
+        log: kayit,
+        ekIzin: (numara) => portalHesabiVar(numara),
+        servisler: { rapor: (b) => waRaporKomutu(b) },
+      }),
       kayit
     );
     if (wa.oturumVarMi()) wa.baslat().catch((e) => hataYaz('whatsapp başlangıç', e));
@@ -299,6 +308,97 @@ function izinliNumaralar() {
     if (r && r.deger != null && String(r.deger).trim()) return String(r.deger);
   } catch { }
   return komut.VARSAYILAN_NUMARALAR;
+}
+
+function portalHesabiVar(numara) {
+  try {
+    const h = db.portalHesap(numara);
+    return !!(h && h.aktif && h.kullanici && h.sifre);
+  } catch {
+    return false;
+  }
+}
+
+function portalAyarlari() {
+  return portalAyar.oku(db);
+}
+
+function portalIlerlemeYolla(o) {
+  if (pencere && !pencere.isDestroyed()) pencere.webContents.send('portalIlerleme', o);
+}
+
+function hesabiHazirla(numara) {
+  const kayit = db.portalHesap(numara);
+  if (!kayit) throw new Error('Bu numara için portal hesabı tanımlı değil.');
+  if (!kayit.aktif) throw new Error('Bu numaranın portal hesabı kapalı.');
+  if (!kayit.kullanici) throw new Error('Bu numara için kullanıcı adı girilmemiş.');
+  let sifre;
+  try {
+    sifre = kasa.coz(kayit.sifre, kayit.sifreli);
+  } catch {
+    throw new Error('Kayıtlı şifre bu bilgisayarda çözülemedi. Ayarlar\'dan yeniden girin.');
+  }
+  if (!sifre) throw new Error('Bu numara için şifre girilmemiş.');
+  return { numara: kayit.numara, ad: kayit.ad, kullanici: kayit.kullanici, sifre };
+}
+
+async function portaliCalistir({ numara, onayKodu, ilerleme }) {
+  const ayarlar = portalAyarlari();
+  const eksik = portalAyar.dogrula(ayarlar);
+  if (eksik.length) throw new Error(`Portal ayarları eksik: ${eksik.join(', ')}.`);
+  const hesap = hesabiHazirla(numara);
+
+  return portal.calistir({
+    hesap,
+    ayarlar,
+    kokKlasor: PORTAL_KLASORU(),
+    onayKodu,
+    log: kayit,
+    ilerleme: (o) => {
+      portalIlerlemeYolla(o);
+      if (ilerleme) { try { ilerleme(o); } catch { } }
+    },
+  });
+}
+
+let uiOnayBekleyen = null;
+
+function uiOnayIste(deneme, sonHata) {
+  return new Promise((coz, red) => {
+    if (uiOnayBekleyen) {
+      clearTimeout(uiOnayBekleyen.sayac);
+      uiOnayBekleyen.red(new Error('Yeni kod istendi.'));
+    }
+    const sure = (portalAyarlari().onaySn || 180) * 1000;
+    const sayac = setTimeout(() => {
+      uiOnayBekleyen = null;
+      portalIlerlemeYolla({ tur: 'onay-bitti' });
+      red(new Error('Onay kodu girilmedi, süre doldu.'));
+    }, sure);
+    uiOnayBekleyen = { coz, red, sayac };
+    portalIlerlemeYolla({ tur: 'onay-istendi', deneme, sonHata: sonHata || null, saniye: sure / 1000 });
+  });
+}
+
+async function waRaporKomutu(b) {
+  if (portal.durumAl().calisiyor) return 'Portal işlemi hâlihazırda çalışıyor, bitince yeniden yazın.';
+
+  await b.gonder('Portala giriliyor…');
+  const ayarlar = portalAyarlari();
+  const sonuc = await portaliCalistir({
+    numara: b.gonderen,
+    onayKodu: async (deneme, sonHata) => {
+      const soru = (sonHata ? `${sonHata}\n\n` : '')
+        + 'Size gelen onay kodunu yazıp gönderin.'
+        + (deneme > 1 ? ` (${deneme}. deneme)` : '');
+      return b.sor(soru, (ayarlar.onaySn || 180) * 1000);
+    },
+  });
+
+  db.logYaz(null, 'portal', `WhatsApp isteği (${b.gonderen}) → ${sonuc.dosyaAdi || 'dosya yok'}`);
+  return `Rapor indirildi.\n\nDosya: ${sonuc.dosyaAdi || '-'}\n`
+    + `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
+    + `Klasör: ${sonuc.klasor}`;
 }
 
 const KILITSIZ = new Set([
@@ -700,6 +800,59 @@ kanal('waGonder', async (istek) => {
   db.logYaz(istek.tarih || istek.ay, 'whatsapp-gonderim',
     `${ad} → ${ayrinti.filter((r) => r.ok).length}/${ayrinti.length} grup`);
   return { dosya: ad, ayrinti };
+});
+
+kanal('portalAyar', () => ({
+  ...portalAyarlari(),
+  kasaVar: kasa.kullanilabilir(),
+  klasor: PORTAL_KLASORU(),
+}));
+kanal('portalAyarYaz', (gelen) => portalAyar.yaz(db, gelen || {}));
+kanal('portalHesaplar', () => db.portalHesaplar());
+
+kanal('portalHesapYaz', (gelen) => {
+  const numara = komut.numaraDuzelt(gelen.numara);
+  if (!numara) throw new Error('Geçerli bir numara yazın (ülke koduyla).');
+  const alan = {
+    id: gelen.id || null,
+    numara,
+    ad: gelen.ad,
+    kullanici: (gelen.kullanici || '').trim(),
+    aktif: gelen.aktif == null ? true : !!gelen.aktif,
+  };
+  if (gelen.sifre != null && gelen.sifre !== '') {
+    const k = kasa.sifrele(gelen.sifre);
+    alan.sifre = k.deger;
+    alan.sifreli = k.sifreli;
+  }
+  return db.portalHesapYaz(alan);
+});
+
+kanal('portalHesapSil', (id) => db.portalHesapSil(id));
+kanal('portalDurum', () => portal.durumAl(), true);
+kanal('portalDurdur', () => portal.iptal(), true);
+
+kanal('portalKlasorAc', () => {
+  const kok = PORTAL_KLASORU();
+  fs.mkdirSync(kok, { recursive: true });
+  shell.openPath(kok);
+  return kok;
+}, true);
+
+kanal('portalOnayVer', (kod) => {
+  if (!uiOnayBekleyen) throw new Error('Şu an onay kodu beklenmiyor.');
+  const b = uiOnayBekleyen;
+  uiOnayBekleyen = null;
+  clearTimeout(b.sayac);
+  portalIlerlemeYolla({ tur: 'onay-bitti' });
+  b.coz(String(kod || ''));
+  return true;
+}, true);
+
+kanal('portalCalistir', async (numara) => {
+  const sonuc = await portaliCalistir({ numara, onayKodu: uiOnayIste });
+  db.logYaz(null, 'portal', `Elle çalıştırıldı (${numara}) → ${sonuc.dosyaAdi || 'dosya yok'}`);
+  return sonuc;
 });
 
 kanal('kilitDurum', () => kilit.durumAl(), true);

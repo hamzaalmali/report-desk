@@ -18,6 +18,10 @@ function numaralariCoz(ham) {
     });
 }
 
+function numaraDuzelt(ham) {
+  return numaralariCoz(ham)[0] || '';
+}
+
 function anahtar(metin) {
   return trUpper(metin).replace(/[\s.\-_?!]/g, '');
 }
@@ -28,6 +32,14 @@ const KOMUTLAR = [
     tam: ['HAVA', 'HAVADURUMU', 'HAVADURUMUNEDİR'],
     onEk: ['HAVADURUMU'],
     calistir: () => mgm.havaMetni(),
+  },
+  {
+    kod: 'rapor',
+    tam: ['RAPOR', 'RAPORGÖNDER', 'RAPORAL', 'RAPORİNDİR', 'RAPORÇEK'],
+    onEk: ['RAPORGÖNDER', 'RAPORAL', 'RAPORİNDİR', 'RAPORÇEK'],
+    ozelSohbet: true,
+    servis: 'rapor',
+    calistir: (b) => b.servisler.rapor(b),
   },
 ];
 
@@ -41,22 +53,33 @@ function komutBul(metin) {
   return null;
 }
 
-function olustur({ izinliler, log }) {
+function olustur({ izinliler, log, servisler = {}, ekIzin = () => false }) {
   const yaz = log || (() => { });
 
-  return async function isle({ gonderen, metin }) {
+  return async function isle(baglam) {
+    const { gonderen, metin, grupMu } = baglam;
     const komut = komutBul(metin);
     if (!komut) return null;
 
     const liste = numaralariCoz(izinliler());
-    if (!liste.includes(gonderen)) {
+    if (!liste.includes(gonderen) && !ekIzin(gonderen, komut.kod)) {
       yaz(`WhatsApp komutu yok sayıldı (${komut.kod}): ${gonderen} izinli listede değil`);
       return null;
     }
 
+    if (komut.ozelSohbet && grupMu) {
+      yaz(`WhatsApp komutu yok sayıldı (${komut.kod}): grup sohbetinde çalışmaz`);
+      return null;
+    }
+
+    if (komut.servis && typeof servisler[komut.servis] !== 'function') {
+      yaz(`WhatsApp komutu karşılanamadı (${komut.kod}): servis bağlı değil`);
+      return 'Bu komut bu bilgisayarda kullanıma açık değil.';
+    }
+
     yaz(`WhatsApp komutu: ${gonderen} → ${komut.kod}`);
     try {
-      return await komut.calistir();
+      return await komut.calistir({ ...baglam, servisler });
     } catch (e) {
       yaz(`WhatsApp komutu başarısız (${komut.kod}): ${e.message}`);
       return `İstek karşılanamadı: ${e.message}`;
@@ -64,4 +87,6 @@ function olustur({ izinliler, log }) {
   };
 }
 
-module.exports = { olustur, komutBul, numaralariCoz, VARSAYILAN_NUMARALAR };
+module.exports = {
+  olustur, komutBul, numaralariCoz, numaraDuzelt, anahtar, KOMUTLAR, VARSAYILAN_NUMARALAR,
+};

@@ -448,6 +448,111 @@ async function main() {
       (await isle({ gonderen: '905001112233', metin: 'hava durumu' })) === null);
     kontrol('izinli numara alakasız metne yanıt almıyor',
       (await isle({ gonderen: '905388179495', metin: 'merhaba' })) === null);
+
+    kontrol('rapor komutu tanınıyor',
+      ['rapor gönder', 'Rapor Gönder', 'RAPOR GÖNDER', 'rapor gönder.', 'rapor indir', 'rapor']
+        .every((m) => (komut.komutBul(m) || {}).kod === 'rapor'),
+      ['rapor gönder', 'rapor indir', 'rapor']
+        .map((m) => `${m}=${(komut.komutBul(m) || {}).kod}`).join(' '));
+    kontrol('raporla ilgisiz metin rapor komutu değil',
+      ['raporlama nasıl', 'rapordan bahsettik', 'gönder rapor']
+        .every((m) => (komut.komutBul(m) || {}).kod !== 'rapor'));
+    kontrol('hava komutu rapor komutuna karışmıyor',
+      komut.komutBul('hava durumu').kod === 'hava');
+
+    let cagrildi = null;
+    const raporlu = komut.olustur({
+      izinliler: () => '',
+      log: () => { },
+      ekIzin: (n) => n === '905551112233',
+      servisler: { rapor: (b) => { cagrildi = b.gonderen; return 'oldu'; } },
+    });
+    kontrol('portal hesabı olan numara izinli listede olmadan rapor çekebiliyor',
+      (await raporlu({ gonderen: '905551112233', metin: 'rapor gönder' })) === 'oldu'
+      && cagrildi === '905551112233');
+    kontrol('portal hesabı olmayan numaraya rapor komutu çalışmıyor',
+      (await raporlu({ gonderen: '905009998877', metin: 'rapor gönder' })) === null);
+    kontrol('rapor komutu grup sohbetinde çalışmıyor',
+      (await raporlu({ gonderen: '905551112233', metin: 'rapor gönder', grupMu: true })) === null);
+
+    const servissiz = komut.olustur({
+      izinliler: () => '905551112233', log: () => { },
+    });
+    kontrol('servis bağlı değilken rapor komutu açıklama döndürüyor',
+      typeof (await servissiz({ gonderen: '905551112233', metin: 'rapor gönder' })) === 'string');
+
+    kontrol('tek numara düzeltme aynı kurala uyuyor',
+      komut.numaraDuzelt('0538 817 94 95') === '905388179495'
+      && komut.numaraDuzelt('') === '');
+  }
+
+  console.log('\nPortal hesapları ve ayarları');
+  {
+    const portalAyar = require('../src/main/portal/ayar');
+    const portal = require('../src/main/portal/portal');
+    const kasa = require('../src/main/portal/kasa');
+
+    const v = portalAyar.oku(db);
+    kontrol('portal ayarları varsayılanla geliyor',
+      v.saat === '01:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === '',
+      JSON.stringify(v));
+    kontrol('eksik ayar bildiriliyor', portalAyar.dogrula(v).length === 2);
+
+    const y = portalAyar.yaz(db, {
+      girisUrl: 'https://ornek.test/Login.aspx', raporAdi: 'Bir Rapor',
+      saat: '02:00', gunGeri: 3, gorunur: false,
+    });
+    kontrol('ayarlar kaydedilip geri okunuyor',
+      y.girisUrl === 'https://ornek.test/Login.aspx' && y.raporAdi === 'Bir Rapor'
+      && y.saat === '02:00' && y.gunGeri === 3 && y.gorunur === false, JSON.stringify(y));
+    kontrol('ana sayfa adresi giriş adresinden türetiliyor',
+      y.anaUrl === 'https://ornek.test/default.aspx', y.anaUrl);
+    kontrol('kaydedilmemiş ayar bozulmuyor',
+      portalAyar.oku(db).altMenuXpath.includes('leftsidenav'));
+    kontrol('ayarlar eksiksizken uyarı yok', portalAyar.dogrula(y).length === 0);
+
+    const s = kasa.sifrele('gizli-123');
+    kontrol('şifre kasadan geçip aynı dönüyor', kasa.coz(s.deger, s.sifreli) === 'gizli-123');
+    kontrol('boş şifre boş kalıyor', kasa.sifrele('').deger === '');
+
+    db.portalHesapYaz({
+      numara: '905551112233', ad: 'Deneme', kullanici: 'kadi',
+      sifre: s.deger, sifreli: s.sifreli, aktif: true,
+    });
+    let hepsi = db.portalHesaplar();
+    kontrol('hesap kaydedildi, şifre listeye sızmıyor',
+      hepsi.length === 1 && hepsi[0].sifreVar === 1 && hepsi[0].sifre === undefined,
+      JSON.stringify(hepsi[0]));
+
+    const kayit = db.portalHesap('905551112233');
+    kontrol('kayıtlı şifre geri çözülüyor', kasa.coz(kayit.sifre, kayit.sifreli) === 'gizli-123');
+
+    db.portalHesapYaz({ id: kayit.id, numara: '905551112233', ad: 'Deneme 2', kullanici: 'kadi2', aktif: true });
+    const guncel = db.portalHesap('905551112233');
+    kontrol('şifre gönderilmeyince eski şifre korunuyor',
+      guncel.kullanici === 'kadi2' && kasa.coz(guncel.sifre, guncel.sifreli) === 'gizli-123');
+
+    db.portalHesapYaz({ numara: '905551112233', ad: 'Çakışma', kullanici: 'k3', aktif: false });
+    kontrol('aynı numara ikinci kez eklenmiyor, güncelleniyor',
+      db.portalHesaplar().length === 1 && db.portalHesap('905551112233').aktif === 0);
+
+    db.portalHesapSil(db.portalHesap('905551112233').id);
+    kontrol('hesap silinebiliyor', db.portalHesaplar().length === 0);
+
+    const a = portal.tarihAraligi(1, new Date(2026, 0, 1));
+    kontrol('tarih aralığı bir gün geriden başlıyor',
+      a.bas.metin === '31.12.2025' && a.son.metin === '01.01.2026',
+      `${a.bas.metin} → ${a.son.metin}`);
+    const a0 = portal.tarihAraligi(0, new Date(2026, 7, 14));
+    kontrol('sıfır gün geri aynı günü veriyor',
+      a0.bas.metin === '14.08.2026' && a0.son.metin === '14.08.2026');
+
+    kontrol('kayıtlardaki şifre gizleniyor',
+      portal.gizle('<input value="gizli-123">', ['gizli-123']) === '<input value="***">');
+    kontrol('kısa değerler gizleme diye her şeyi silmiyor',
+      portal.gizle('abcdef', ['ab']) === 'abcdef');
+    kontrol('dosya adı güvenli hale geliyor',
+      portal.dosyaAdiTemiz('Rapor / Giriş: 2026?') === 'Rapor-Giriş-2026');
   }
 
   console.log('\nWhatsApp gönderen numarası');

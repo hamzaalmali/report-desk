@@ -117,6 +117,17 @@ CREATE TABLE IF NOT EXISTS senkron_durum (
   deger   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS portal_hesap (
+  id          INTEGER PRIMARY KEY,
+  numara      TEXT    NOT NULL UNIQUE,
+  ad          TEXT    NOT NULL DEFAULT '',
+  kullanici   TEXT    NOT NULL DEFAULT '',
+  sifre       TEXT    NOT NULL DEFAULT '',
+  sifreli     INTEGER NOT NULL DEFAULT 0,
+  aktif       INTEGER NOT NULL DEFAULT 1,
+  guncelleme  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS wa_grup (
   jid         TEXT PRIMARY KEY,
   ad          TEXT NOT NULL,
