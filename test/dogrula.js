@@ -478,6 +478,162 @@ async function main() {
       && metin({ extendedTextMessage: { text: 'hava durumu' } }) === 'hava durumu');
   }
 
+  console.log('\nOrtak klasör ayarları');
+  {
+    const ortak = require('../src/main/ortak');
+    const kok = fs.mkdtempSync(path.join(os.tmpdir(), 'ortak-'));
+    ortak.kur(kok);
+
+    kontrol('başlangıçta ortak klasör yok', ortak.ortakDosya() === null);
+
+    const dosya = path.join(kok, 'paylasim', 'veri-ortak.sqlite');
+    ortak.ortakAyarla(dosya);
+    kontrol('ortak dosya kalıcı yazıldı', ortak.ortakDosya() === dosya);
+    kontrol('yapılandırma dosyaya düştü',
+      JSON.parse(fs.readFileSync(path.join(kok, 'yapilandirma.json'), 'utf8')).ortakDosya === dosya);
+
+    kontrol('varsayılan aralık', ortak.aralikDk() === ortak.VARSAYILAN_ARALIK);
+    ortak.aralikYaz(5);
+    kontrol('aralık değiştirilebiliyor', ortak.aralikDk() === 5);
+    let reddetti = false;
+    try { ortak.aralikYaz(7); } catch { reddetti = true; }
+    kontrol('geçersiz aralık reddediliyor', reddetti && ortak.aralikDk() === 5);
+
+    fs.mkdirSync(path.dirname(dosya), { recursive: true });
+    ortak.varlikBildir(dosya, '9.9.9');
+    const k = ortak.kimler(dosya);
+    kontrol('bu makine listede', k.length === 1 && k[0].benMiyim && k[0].surum === '9.9.9');
+
+    const varlik = path.join(path.dirname(dosya), 'kim.json');
+    const liste = JSON.parse(fs.readFileSync(varlik, 'utf8'));
+    liste.push({ makine: 'DIGER-PC', surum: '1.0.0', zaman: Date.now() - 60000 });
+    fs.writeFileSync(varlik, JSON.stringify(liste));
+    ortak.varlikBildir(dosya, '9.9.9');
+    kontrol('kendini bildirmek başkasını silmiyor',
+      ortak.kimler(dosya).map((x) => x.makine).includes('DIGER-PC'));
+
+    ortak.ortakKaldir();
+    kontrol('bağlantı kaldırılabiliyor', ortak.ortakDosya() === null);
+    fs.rmSync(kok, { recursive: true, force: true });
+  }
+
+  console.log('\nEşitleme');
+  {
+    const { esitle } = require('../src/main/senkron/senkron');
+    const kok = fs.mkdtempSync(path.join(os.tmpdir(), 'senk-'));
+    const oncekiYol = db.yol();
+
+    const A = path.join(kok, 'a.sqlite');
+    const B = path.join(kok, 'b.sqlite');
+    const ORTAK = path.join(kok, 'ortak.sqlite');
+
+    const kur = (yol) => {
+      db.ac(yol);
+      db.isletmeEkle('ALFA', 1);
+      db.isletmeEkle('BETA', 2);
+      db.kapat();
+    };
+    kur(A);
+    kur(B);
+
+    const ac = (y) => db.baglantiAc(y);
+    const kat = () => {
+      const c = ac(A);
+      const k = c.db.get('SELECT kod FROM kategori ORDER BY sira LIMIT 1').kod;
+      c.kapat();
+      return k;
+    };
+    const kod = kat();
+
+    const isaretle = (yol, isletme, tarih, zaman) => {
+      const c = ac(yol);
+      const i = c.db.get('SELECT id FROM isletme WHERE ad = :a', { ':a': isletme }).id;
+      const kt = c.db.get('SELECT id FROM kategori WHERE kod = :k', { ':k': kod }).id;
+      c.db.run(
+        `INSERT INTO kayit (tarih, isletme_id, kategori_id, ariza_var, guncelleme)
+         VALUES (:t, :i, :k, 1, :g)
+         ON CONFLICT(tarih, isletme_id, kategori_id) DO UPDATE SET
+           ariza_var = excluded.ariza_var, guncelleme = excluded.guncelleme`,
+        { ':t': tarih, ':i': i, ':k': kt, ':g': zaman }
+      );
+      c.kapat();
+    };
+    const oku = (yol, tarih, isletme) => {
+      const c = ac(yol);
+      const r = c.db.get(
+        `SELECT k.ariza_var FROM kayit k
+         JOIN isletme i ON i.id = k.isletme_id
+         JOIN kategori kt ON kt.id = k.kategori_id
+         WHERE k.tarih = :t AND i.ad = :a AND kt.kod = :k`,
+        { ':t': tarih, ':a': isletme, ':k': kod }
+      );
+      c.kapat();
+      return r ? r.ariza_var : null;
+    };
+    const esitleyi = (yol) => {
+      const y = ac(yol);
+      const o = ac(ORTAK);
+      const s = esitle(y.db, o.db);
+      y.kapat();
+      o.kapat();
+      return s;
+    };
+
+    isaretle(A, 'ALFA', '2026-09-01', '2026-08-01 08:00:00');
+    isaretle(B, 'BETA', '2026-09-02', '2026-08-01 08:05:00');
+
+    esitleyi(A);
+    esitleyi(B);
+    esitleyi(A);
+
+    kontrol('A kendi kaydını koruyor', oku(A, '2026-09-01', 'ALFA') === 1);
+    kontrol('A, B nin kaydını aldı', oku(A, '2026-09-02', 'BETA') === 1);
+    kontrol('B, A nın kaydını aldı', oku(B, '2026-09-01', 'ALFA') === 1);
+
+    const bos = esitleyi(A);
+    kontrol('tekrar eşitleme boş — yankı yok',
+      bos.gonderilen === 0 && bos.alinan === 0
+      && bos.yerelSilinen === 0 && bos.ortakSilinen === 0, JSON.stringify(bos));
+
+    isaretle(A, 'ALFA', '2026-09-03', '2026-08-03 10:00:00');
+    isaretle(B, 'ALFA', '2026-09-03', '2026-08-03 09:00:00');
+    {
+      const c = ac(B);
+      const i = c.db.get("SELECT id FROM isletme WHERE ad = 'ALFA'").id;
+      const kt = c.db.get('SELECT id FROM kategori WHERE kod = :k', { ':k': kod }).id;
+      c.db.run(`UPDATE kayit SET ariza_var = 0, guncelleme = '2026-08-03 09:00:00'
+                WHERE tarih = '2026-09-03' AND isletme_id = :i AND kategori_id = :k`,
+      { ':i': i, ':k': kt });
+      c.kapat();
+    }
+    esitleyi(A);
+    esitleyi(B);
+    kontrol('çakışmada sonraki değişiklik kazanıyor',
+      oku(B, '2026-09-03', 'ALFA') === 1, 'B nin eski değeri A nın yenisiyle değişmeli');
+
+    db.ac(A);
+    db.gunSil('2026-09-01');
+    const mezar = db.raw.get("SELECT COUNT(*) c FROM silinen WHERE tur = 'kayit'").c;
+    db.kapat();
+    kontrol('silme mezar kaydı bırakıyor', mezar > 0, `${mezar} kayıt`);
+
+    esitleyi(A);
+    esitleyi(B);
+    kontrol('silme diğer makineye geçiyor', oku(B, '2026-09-01', 'ALFA') === null);
+
+    esitleyi(A);
+    kontrol('silinen kayıt geri gelmiyor', oku(A, '2026-09-01', 'ALFA') === null);
+
+    const bos2 = esitleyi(B);
+    kontrol('silmeden sonra da kararlı',
+      bos2.gonderilen === 0 && bos2.alinan === 0
+      && bos2.yerelSilinen === 0 && bos2.ortakSilinen === 0, JSON.stringify(bos2));
+
+    db.kapat();
+    if (oncekiYol) db.ac(oncekiYol);
+    fs.rmSync(kok, { recursive: true, force: true });
+  }
+
   console.log('\nUzaktan durdurma');
   {
     let icerik = '{"durum":"acik","mesaj":""}';

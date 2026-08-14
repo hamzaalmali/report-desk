@@ -100,6 +100,7 @@ function bildir(mesaj, tur = 'bilgi') {
   const renk = {
     bilgi: 'border-line-2 bg-panel-3 text-fg',
     basari: 'border-brand-2/60 bg-brand-dim text-fg',
+    uyari: 'border-warn/50 bg-warn/10 text-fg',
     hata: 'border-danger/60 bg-danger/15 text-fg',
   }[tur];
   const d = document.createElement('div');
@@ -122,6 +123,19 @@ const tarihYaz = (iso) => {
   if (!iso) return '—';
   const [y, a, g] = iso.split('-');
   return `${g}.${a}.${y}`;
+};
+const zamanYaz = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const gecen = Math.round((Date.now() - d.getTime()) / 60000);
+  if (gecen < 1) return 'az önce';
+  if (gecen < 60) return `${gecen} dk önce`;
+  const ik = (n) => String(n).padStart(2, '0');
+  const ayni = d.toDateString() === new Date().toDateString();
+  return ayni
+    ? `${ik(d.getHours())}:${ik(d.getMinutes())}`
+    : `${ik(d.getDate())}.${ik(d.getMonth() + 1)} ${ik(d.getHours())}:${ik(d.getMinutes())}`;
 };
 const ayYaz = (ay) => {
   const [y, a] = ay.split('-').map(Number);
@@ -225,6 +239,7 @@ function vtHatasiCiz(durum) {
         </div>
       </div>
     </div>`;
+
   el('vtOnar').onclick = async () => {
     try {
       const r = await cagir(api.vtOnar());
@@ -241,6 +256,13 @@ function vtHatasiCiz(durum) {
     await api.panoyaKopyala(JSON.stringify(durum, null, 2));
     bildir('Hata raporu panoya kopyalandı — yapıştırıp gönderebilirsiniz.', 'basari');
   };
+}
+
+function duzenlemeVarMi() {
+  const e = document.activeElement;
+  if (e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.isContentEditable)) return true;
+  const panel = document.getElementById('yanPanel');
+  return !!panel && !panel.classList.contains('hidden');
 }
 
 async function git(id) {
@@ -1756,8 +1778,9 @@ function waGonderBagla(bagli) {
 }
 
 async function sayfaAyarlar() {
-  const [surum, ozet, loglar, isletmeler] = await Promise.all([
+  const [surum, ozet, loglar, isletmeler, ortak] = await Promise.all([
     cagir(api.surum()), cagir(api.ozet()), cagir(api.loglar()), cagir(api.isletmeler()),
+    cagir(api.ortakDurum()),
   ]);
 
   el('icerik').innerHTML = `
@@ -1795,6 +1818,40 @@ async function sayfaAyarlar() {
             <button class="btn" id="vtAc">Klasörde göster</button>
             <button class="btn btn-brand" id="vtYedek">Yedek al</button>
             <button class="btn" id="gunlukAc">Başlangıç günlüğü</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="font-medium">Ortak klasörle eşitleme</div>
+            <div class="text-[11.5px] text-fg-3">
+              Herkes kendi bilgisayarında çalışır, veriler düzenli olarak birleştirilir</div>
+          </div>
+          <span class="chip ${ortak.ortakMi ? 'border-brand-2/50 text-brand' : 'border-line-2 text-fg-3'}"
+                id="ortakRozet">${ortak.ortakMi ? 'açık' : 'kapalı'}</span>
+        </div>
+        <div class="space-y-3 p-5 text-[12.5px]">
+          <div id="ortakDurum"></div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="btn btn-brand" id="ortakSec">
+              ${ortak.ortakMi ? 'Klasörü değiştir' : 'Ortak klasörü seç'}</button>
+            <button class="btn" id="simdiEsitle" ${ortak.ortakMi ? '' : 'disabled'}>
+              ${svg('yenile', 'size-4')} Şimdi eşitle</button>
+            ${ortak.ortakMi ? `<label class="ml-auto flex items-center gap-2 text-fg-2">
+              Her <select class="input py-1" id="ortakAralik">
+                ${ortak.araliklar.map((d) => `<option value="${d}"
+                  ${d === ortak.aralikDk ? 'selected' : ''}>${d}</option>`).join('')}
+              </select> dakikada</label>
+            <button class="btn" id="ortakKaldir">Bağlantıyı kaldır</button>` : ''}
+          </div>
+          <div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">
+            Her bilgisayar kendi veritabanında çalışır. Seçilen ağ klasöründeki ortak dosya
+            belirlenen aralıkla <b class="text-fg-2">iki yönlü birleştirilir</b> — sizin
+            girdikleriniz oraya gider, başkalarının girdikleri size gelir.
+            Aynı hücreyi ikiniz de değiştirdiyseniz <b class="text-fg-2">en son yapılan</b> kalır.
+            Ayarlar, WhatsApp oturumu ve işlem günlüğü eşitlenmez; onlar her bilgisayara özeldir.
           </div>
         </div>
       </div>
@@ -1876,6 +1933,84 @@ async function sayfaAyarlar() {
 
   el('vtAc').onclick = () => api.klasorAc(surum.vt);
   el('gunlukAc').onclick = () => api.gunluguAc();
+
+  const ortakYaz = (d) => {
+    const kutu = el('ortakDurum');
+    if (!kutu) return;
+    if (!d.ortakMi) {
+      kutu.innerHTML = '<div class="text-fg-2">Ortak klasör seçilmedi — '
+        + 'veriler yalnızca bu bilgisayarda duruyor.</div>';
+      return;
+    }
+    const s = d.son;
+    const sonSatir = !s
+      ? '<span class="text-fg-3">henüz eşitlenmedi</span>'
+      : s.basarili
+        ? `<span class="text-brand">${zamanYaz(s.zaman)}</span>
+           <span class="text-fg-3">· gönderilen ${s.gonderilen} · alınan ${s.alinan}
+           ${s.yerelSilinen + s.ortakSilinen ? `· silinen ${s.yerelSilinen + s.ortakSilinen}` : ''}
+           · ${(s.sureMs / 1000).toFixed(1)} sn</span>`
+        : `<span class="text-danger">${zamanYaz(s.zaman)} — başarısız</span>
+           <div class="text-[11.5px] text-fg-3">${kacar(s.hata || '')}</div>`;
+
+    kutu.innerHTML = `
+      <div class="flex justify-between gap-4"><span class="shrink-0 text-fg-2">Ortak dosya</span>
+        <span class="truncate font-mono text-[11px] ${d.erisilebilir ? 'text-fg-3' : 'text-danger'}"
+          >${kacar(d.dosya)}${d.erisilebilir ? '' : '  (klasöre erişilemiyor)'}</span></div>
+      <div class="flex justify-between gap-4"><span class="shrink-0 text-fg-2">Son eşitleme</span>
+        <span class="text-right">${sonSatir}</span></div>
+      <div class="mt-2 text-fg-2">Bu klasörü kullananlar (${d.kimler.length})</div>
+      <div class="mt-1 flex flex-wrap gap-1.5">
+        ${d.kimler.map((k) => `<span class="chip ${k.benMiyim
+          ? 'border-brand-2/50 text-brand' : 'border-line-2 text-fg-3'}"
+          title="${k.dakika} dakika önce eşitledi">${kacar(k.makine)}${
+          k.surum ? ` · v${kacar(k.surum)}` : ''}</span>`).join('')
+        || '<span class="text-[11.5px] text-fg-3">Henüz kimse eşitlemedi.</span>'}
+      </div>`;
+  };
+  ortakYaz(ortak);
+
+  el('ortakSec').onclick = async () => {
+    const b = el('ortakSec');
+    b.disabled = true;
+    try {
+      const d = await cagir(api.ortakSec());
+      if (d === null) { b.disabled = false; return; }
+      bildir('Ortak klasör ayarlandı ve ilk eşitleme yapıldı.', 'basari');
+      sayfaAyarlar();
+    } catch (e) { bildir(kacar(e.message), 'hata'); b.disabled = false; }
+  };
+
+  el('simdiEsitle').onclick = async () => {
+    const b = el('simdiEsitle');
+    b.disabled = true;
+    try {
+      const s = await cagir(api.simdiEsitle());
+      bildir(`Eşitlendi — gönderilen ${s.gonderilen}, alınan ${s.alinan}`
+        + `${s.yerelSilinen + s.ortakSilinen ? `, silinen ${s.yerelSilinen + s.ortakSilinen}` : ''}.`,
+      'basari');
+      sayfaAyarlar();
+    } catch (e) { bildir(kacar(e.message), 'hata'); b.disabled = false; }
+  };
+
+  if (el('ortakKaldir')) {
+    el('ortakKaldir').onclick = async () => {
+      try {
+        await cagir(api.ortakKaldir());
+        bildir('Ortak klasör bağlantısı kaldırıldı. Verileriniz bu bilgisayarda duruyor.', 'basari');
+        sayfaAyarlar();
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  }
+
+  if (el('ortakAralik')) {
+    el('ortakAralik').onchange = async (o) => {
+      try {
+        await cagir(api.ortakAralik(Number(o.target.value)));
+        bildir(`Eşitleme aralığı ${o.target.value} dakika olarak ayarlandı.`, 'basari');
+      } catch (e) { bildir(kacar(e.message), 'hata'); }
+    };
+  }
 
   el('hepsiniSifirla').onclick = async () => {
     const b = el('hepsiniSifirla');
@@ -1987,6 +2122,17 @@ function baslat() {
       bildir(`Yeni sürüm indirildi (<b>${veri.surum}</b>). Uygulamayı kapatınca kurulacak.`, 'basari');
     } else if (veri.tur === 'var') {
       bildir(`Yeni sürüm bulundu: <b>${veri.surum}</b> — indiriliyor…`);
+    }
+  });
+
+  api.esitlemeDinle((v) => {
+    if (!v.basarili) {
+      bildir(`Eşitleme başarısız: ${kacar(v.hata || '')}`, 'uyari');
+      return;
+    }
+    if (v.alinan || v.yerelSilinen) {
+      bildir(`Eşitleme: ${v.alinan} kayıt alındı.`, 'basari');
+      if (D.sayfa !== 'ayarlar' && !duzenlemeVarMi()) git(D.sayfa).catch(() => { });
     }
   });
 

@@ -15,6 +15,8 @@ const wa = require('./whatsapp/wa');
 const komut = require('./whatsapp/komut');
 const mgm = require('./hava/mgm');
 const kilit = require('./kilit');
+const ortak = require('./ortak');
+const senkron = require('./senkron/senkron');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
 let pencere = null;
@@ -220,9 +222,8 @@ function tesis(bilgi) {
 }
 
 function veritabaniniAc() {
-  const yollar = [VERI_DOSYASI()];
   const yedekKlasor = path.join(app.getPath('documents'), 'report-desk');
-  yollar.push(path.join(yedekKlasor, 'veri.sqlite'));
+  const yollar = [VERI_DOSYASI(), path.join(yedekKlasor, 'veri.sqlite')];
 
   let ilkHata = null;
   let ilkBilgi = null;
@@ -250,8 +251,10 @@ function veritabaniniAc() {
 
 app.whenReady().then(() => {
   kayit(`--- Başlangıç · sürüm ${app.getVersion()} · ${process.platform} ---`);
+  ortak.kur(app.getPath('userData'));
   pencereOlustur();
   veritabaniniAc();
+  zamanlayiciyiKur();
   try {
     guncellemeyiKur(() => pencere);
   } catch (e) {
@@ -298,7 +301,10 @@ function izinliNumaralar() {
   return komut.VARSAYILAN_NUMARALAR;
 }
 
-const KILITSIZ = new Set(['surum', 'kilitDurum', 'panoyaKopyala', 'gunluguAc', 'klasorAc']);
+const KILITSIZ = new Set([
+  'surum', 'kilitDurum', 'panoyaKopyala', 'gunluguAc', 'klasorAc',
+  'ortakDurum', 'ortakSec', 'ortakKaldir', 'ortakAralik', 'simdiEsitle',
+]);
 
 function kanal(ad, fn, vtGerekmez = false) {
   ipcMain.handle(ad, async (_olay, ...args) => {
@@ -372,6 +378,111 @@ kanal('vtYedekle', async () => {
 
 kanal('oneriler', (tarih) => db.oneriler(tarih));
 kanal('loglar', () => db.loglar());
+
+let esitlemeCalisiyor = false;
+let esitlemeSayaci = null;
+
+function ortakDurum() {
+  const dosya = ortak.ortakDosya();
+  return {
+    dosya,
+    ortakMi: !!dosya,
+    erisilebilir: dosya ? fs.existsSync(path.dirname(dosya)) : false,
+    aralikDk: ortak.aralikDk(),
+    araliklar: ortak.ARALIKLAR,
+    makine: ortak.makineAdi(),
+    son: ortak.sonEsitleme(),
+    calisiyor: esitlemeCalisiyor,
+    kimler: dosya ? ortak.kimler(dosya) : [],
+  };
+}
+
+function esitlemeyiCalistir(elle = false) {
+  const dosya = ortak.ortakDosya();
+  if (!dosya) throw new Error('Ortak klasör seçilmemiş.');
+  if (esitlemeCalisiyor) return ortak.sonEsitleme();
+  if (dbHatasi) throw new Error('Yerel veritabanı açık değil.');
+
+  esitlemeCalisiyor = true;
+  const basladi = Date.now();
+  let baglanti = null;
+  try {
+    baglanti = db.baglantiAc(dosya);
+    const sayac = senkron.esitle(db.raw, baglanti.db);
+    const kayitNesnesi = {
+      zaman: new Date().toISOString(),
+      sureMs: Date.now() - basladi,
+      elle,
+      basarili: true,
+      ...sayac,
+    };
+    ortak.sonEsitlemeYaz(kayitNesnesi);
+    ortak.varlikBildir(dosya, app.getVersion());
+    kayit(`Eşitleme tamam (${kayitNesnesi.sureMs} ms): gönderilen ${sayac.gonderilen}, `
+      + `alınan ${sayac.alinan}, silinen ${sayac.yerelSilinen + sayac.ortakSilinen}`);
+    if (pencere && !pencere.isDestroyed()) {
+      pencere.webContents.send('esitlemeBitti', { ...kayitNesnesi, durum: ortakDurum() });
+    }
+    return kayitNesnesi;
+  } catch (e) {
+    const kayitNesnesi = {
+      zaman: new Date().toISOString(),
+      sureMs: Date.now() - basladi,
+      elle,
+      basarili: false,
+      hata: e.message,
+    };
+    ortak.sonEsitlemeYaz(kayitNesnesi);
+    hataYaz('eşitleme', e);
+    if (pencere && !pencere.isDestroyed()) {
+      pencere.webContents.send('esitlemeBitti', { ...kayitNesnesi, durum: ortakDurum() });
+    }
+    throw e;
+  } finally {
+    if (baglanti) baglanti.kapat();
+    esitlemeCalisiyor = false;
+  }
+}
+
+function zamanlayiciyiKur() {
+  clearInterval(esitlemeSayaci);
+  if (!ortak.ortakDosya()) return;
+  esitlemeSayaci = setInterval(() => {
+    try { esitlemeyiCalistir(false); } catch { }
+  }, ortak.aralikDk() * 60000);
+}
+
+kanal('ortakDurum', () => ortakDurum(), true);
+
+kanal('ortakSec', async () => {
+  const r = await dialog.showOpenDialog(pencere, {
+    title: 'Ortak klasörü seçin',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (r.canceled) return null;
+  const dosya = path.join(r.filePaths[0], 'veri-ortak.sqlite');
+  ortak.ortakAyarla(dosya);
+  kayit(`Ortak klasör seçildi: ${dosya}`);
+  zamanlayiciyiKur();
+  esitlemeyiCalistir(true);
+  return ortakDurum();
+}, true);
+
+kanal('ortakKaldir', () => {
+  ortak.ortakKaldir();
+  clearInterval(esitlemeSayaci);
+  kayit('Ortak klasör bağlantısı kaldırıldı.');
+  return ortakDurum();
+}, true);
+
+kanal('ortakAralik', (dk) => {
+  ortak.aralikYaz(dk);
+  zamanlayiciyiKur();
+  kayit(`Eşitleme aralığı: ${dk} dakika`);
+  return ortakDurum();
+}, true);
+
+kanal('simdiEsitle', () => esitlemeyiCalistir(true), true);
 
 kanal('dosyaSec', async (baslik) => {
   const r = await dialog.showOpenDialog(pencere, {

@@ -8,23 +8,131 @@ const { Database } = require('node-sqlite3-wasm');
 const { KATEGORILER, otomatikAlanlar, TUM_ALANLAR } = require('../../shared/kategoriler');
 const { key } = require('../../shared/tr');
 const { ISLETMELER, ESLESMELER } = require('./seed');
+const { AYRAC } = require('../senkron/varliklar');
 
 let db = null;
+let ham = null;
 let dbYolu = null;
+let bekleyisSayaci = { deneme: 0, toplamMs: 0, sonHata: null };
+
+const BEKLEME_BUTCESI = 8000;
+const SARILACAK = new Set(['run', 'get', 'all', 'exec', 'prepare']);
+
+function kilitliMi(e) {
+  return !!e && /database (is|table is) locked/i.test(e.message || '');
+}
+
+function uyu(ms) {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const bas = Date.now();
+    while (Date.now() - bas < ms);
+  }
+}
+
+function yenidenDene(fn) {
+  const bitis = Date.now() + BEKLEME_BUTCESI;
+  let bekle = 10;
+  let denendi = 0;
+  const basladi = Date.now();
+  for (;;) {
+    try {
+      const r = fn();
+      if (denendi) {
+        bekleyisSayaci.deneme += denendi;
+        bekleyisSayaci.toplamMs += Date.now() - basladi;
+      }
+      return r;
+    } catch (e) {
+      if (!kilitliMi(e) || Date.now() >= bitis) {
+        if (kilitliMi(e)) bekleyisSayaci.sonHata = new Date().toISOString();
+        throw e;
+      }
+      denendi++;
+      uyu(bekle + Math.floor(Math.random() * bekle));
+      bekle = Math.min(250, bekle * 2);
+    }
+  }
+}
+
+function ifadeSarmala(ifade) {
+  return new Proxy(ifade, {
+    get(hedef, ad) {
+      const d = hedef[ad];
+      if (typeof d !== 'function') return d;
+      if (ad === 'run' || ad === 'get' || ad === 'all') {
+        return (...a) => yenidenDene(() => d.apply(hedef, a));
+      }
+      return d.bind(hedef);
+    },
+  });
+}
+
+function sarmala(gercek) {
+  return new Proxy(gercek, {
+    get(hedef, ad) {
+      const d = hedef[ad];
+      if (typeof d !== 'function') return d;
+      if (ad === 'prepare') {
+        return (...a) => ifadeSarmala(yenidenDene(() => d.apply(hedef, a)));
+      }
+      if (!SARILACAK.has(ad)) return d.bind(hedef);
+      return (...a) => yenidenDene(() => d.apply(hedef, a));
+    },
+  });
+}
+
+function bekleyisOzeti() {
+  return { ...bekleyisSayaci };
+}
 
 function ac(dosyaYolu) {
-  if (db) db.close();
+  if (ham) ham.close();
   dbYolu = dosyaYolu;
   fs.mkdirSync(path.dirname(dosyaYolu), { recursive: true });
-  db = new Database(dosyaYolu);
+  ham = new Database(dosyaYolu);
+  db = sarmala(ham);
   db.run('PRAGMA foreign_keys = ON');
   kur();
   return db;
 }
 
-function kur() {
+const DAMGALI_TABLOLAR = [
+  'isletme', 'eslesme', 'gun_kategori', 'vardiya_ekip', 'vardiya_personel', 'vardiya_kayit',
+];
+
+function goc(hedef) {
+  for (const tablo of DAMGALI_TABLOLAR) {
+    const sutunlar = hedef.all(`PRAGMA table_info(${tablo})`).map((s) => s.name);
+    if (!sutunlar.includes('guncelleme')) {
+      hedef.run(`ALTER TABLE ${tablo} ADD COLUMN guncelleme TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
+      hedef.run(`UPDATE ${tablo} SET guncelleme = datetime('now')`);
+    }
+  }
+}
+
+function semaKur(hedef) {
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
-  db.exec(sql);
+  hedef.exec(sql);
+  goc(hedef);
+}
+
+function baglantiAc(dosyaYolu) {
+  fs.mkdirSync(path.dirname(dosyaYolu), { recursive: true });
+  const hamBaglanti = new Database(dosyaYolu);
+  const sarili = sarmala(hamBaglanti);
+  sarili.run('PRAGMA foreign_keys = ON');
+  semaKur(sarili);
+  kategorileriSenkronla(sarili);
+  return {
+    db: sarili,
+    kapat() { try { hamBaglanti.close(); } catch { } },
+  };
+}
+
+function kur() {
+  semaKur(db);
   kategorileriSenkronla();
   if (sayi('isletme') === 0 && db.get("SELECT deger FROM ayar WHERE anahtar = 'ilkKurulum'") == null) {
     ilkKurulum();
@@ -53,8 +161,8 @@ function sayi(tablo) {
   return db.get(`SELECT COUNT(*) AS c FROM ${tablo}`).c;
 }
 
-function kategorileriSenkronla() {
-  const st = db.prepare(
+function kategorileriSenkronla(hedef = db) {
+  const st = hedef.prepare(
     `INSERT INTO kategori (kod, ad, genislik, otomatik, sira)
      VALUES (:kod, :ad, :genislik, :otomatik, :sira)
      ON CONFLICT(kod) DO UPDATE SET
@@ -88,22 +196,48 @@ function isletmeEkle(ad, sira) {
   return i;
 }
 
+function mezarYaz(tur, anahtar) {
+  db.run(
+    `INSERT INTO silinen (tur, anahtar, zaman) VALUES (:t, :a, datetime('now'))
+     ON CONFLICT(tur, anahtar) DO UPDATE SET zaman = datetime('now')`,
+    { ':t': tur, ':a': anahtar }
+  );
+}
+
+function anahtarBirlestir(...p) {
+  return p.map((x) => String(x == null ? '' : x)).join(AYRAC);
+}
+
 function isletmeSil(id) {
-  db.run('DELETE FROM isletme WHERE id = :id', { ':id': id });
+  islem(() => {
+    const i = db.get('SELECT ad FROM isletme WHERE id = :id', { ':id': id });
+    if (!i) return;
+    for (const k of db.all(
+      `SELECT k.tarih, kt.kod FROM kayit k JOIN kategori kt ON kt.id = k.kategori_id
+       WHERE k.isletme_id = :id`, { ':id': id })) {
+      mezarYaz('kayit', anahtarBirlestir(k.tarih, i.ad, k.kod));
+    }
+    for (const e of db.all('SELECT kaynak_deger, tip FROM eslesme WHERE isletme_id = :id',
+      { ':id': id })) {
+      mezarYaz('eslesme', anahtarBirlestir(e.kaynak_deger, e.tip));
+    }
+    db.run('DELETE FROM isletme WHERE id = :id', { ':id': id });
+    mezarYaz('isletme', anahtarBirlestir(i.ad));
+  });
 }
 
 function isletmeSirala(idler) {
   if (!Array.isArray(idler) || !idler.length) return 0;
   let n = 0;
   islem(() => {
-    const st = db.prepare('UPDATE isletme SET sira = :s WHERE id = :id');
+    const st = db.prepare("UPDATE isletme SET sira = :s, guncelleme = datetime('now') WHERE id = :id");
     idler.forEach((id, i) => { st.run({ ':s': i + 1, ':id': id }); n++; });
     st.finalize();
     const kalan = db.all(
       'SELECT id FROM isletme WHERE id NOT IN (' + idler.map(() => '?').join(',') + ') ORDER BY sira, id',
       idler
     );
-    const st2 = db.prepare('UPDATE isletme SET sira = :s WHERE id = :id');
+    const st2 = db.prepare("UPDATE isletme SET sira = :s, guncelleme = datetime('now') WHERE id = :id");
     kalan.forEach((r, i) => st2.run({ ':s': idler.length + i + 1, ':id': r.id }));
     st2.finalize();
   });
@@ -286,25 +420,53 @@ function gunKategoriAc(tarih, kategoriIdler) {
   st.finalize();
 }
 
+function kayitMezarlari(kosul, parametre) {
+  return db.all(
+    `SELECT k.tarih, i.ad AS isletme, kt.kod FROM kayit k
+     JOIN isletme i ON i.id = k.isletme_id
+     JOIN kategori kt ON kt.id = k.kategori_id
+     WHERE ${kosul}`, parametre
+  );
+}
+
 function gunSil(tarih) {
-  db.run('DELETE FROM kayit WHERE tarih = :t', { ':t': tarih });
-  db.run('DELETE FROM gun_kategori WHERE tarih = :t', { ':t': tarih });
-  db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
+  islem(() => {
+    for (const k of kayitMezarlari('k.tarih = :t', { ':t': tarih })) {
+      mezarYaz('kayit', anahtarBirlestir(k.tarih, k.isletme, k.kod));
+    }
+    for (const g of db.all(
+      `SELECT kt.kod FROM gun_kategori g JOIN kategori kt ON kt.id = g.kategori_id
+       WHERE g.tarih = :t`, { ':t': tarih })) {
+      mezarYaz('gun_kategori', anahtarBirlestir(tarih, g.kod));
+    }
+    db.run('DELETE FROM kayit WHERE tarih = :t', { ':t': tarih });
+    db.run('DELETE FROM gun_kategori WHERE tarih = :t', { ':t': tarih });
+    db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
+  });
 }
 
 function kategoriSifirla(tarih, kategoriId, genislik = 4) {
   const temizlenecek = otomatikAlanlar(genislik === 2 ? 2 : 4);
-  db.run(
-    `UPDATE kayit SET ${temizlenecek.map((a) => `${a} = 0`).join(', ')}
-     WHERE tarih = :t AND kategori_id = :k`,
-    { ':t': tarih, ':k': kategoriId }
-  );
-  db.run(
-    `DELETE FROM kayit WHERE tarih = :t AND kategori_id = :k
-       AND ${ALANLAR.map((a) => `${a} = 0`).join(' AND ')}
-       AND (aciklama IS NULL OR aciklama = '')`,
-    { ':t': tarih, ':k': kategoriId }
-  );
+  islem(() => {
+    db.run(
+      `UPDATE kayit SET ${temizlenecek.map((a) => `${a} = 0`).join(', ')},
+              guncelleme = datetime('now')
+       WHERE tarih = :t AND kategori_id = :k`,
+      { ':t': tarih, ':k': kategoriId }
+    );
+    const kosul = `k.tarih = :t AND k.kategori_id = :k
+       AND ${ALANLAR.map((a) => `k.${a} = 0`).join(' AND ')}
+       AND (k.aciklama IS NULL OR k.aciklama = '')`;
+    for (const s of kayitMezarlari(kosul, { ':t': tarih, ':k': kategoriId })) {
+      mezarYaz('kayit', anahtarBirlestir(s.tarih, s.isletme, s.kod));
+    }
+    db.run(
+      `DELETE FROM kayit WHERE tarih = :t AND kategori_id = :k
+         AND ${ALANLAR.map((a) => `${a} = 0`).join(' AND ')}
+         AND (aciklama IS NULL OR aciklama = '')`,
+      { ':t': tarih, ':k': kategoriId }
+    );
+  });
 }
 
 function otomatikIsaretle(tarih, kategoriId, isletmeIdler, genislik) {
@@ -342,7 +504,12 @@ function eslesmeEkle({ kaynak_deger, isletme_id, tip }) {
 }
 
 function eslesmeSil(id) {
-  db.run('DELETE FROM eslesme WHERE id = :id', { ':id': id });
+  islem(() => {
+    const e = db.get('SELECT kaynak_deger, tip FROM eslesme WHERE id = :id', { ':id': id });
+    if (!e) return;
+    db.run('DELETE FROM eslesme WHERE id = :id', { ':id': id });
+    mezarYaz('eslesme', anahtarBirlestir(e.kaynak_deger, e.tip));
+  });
 }
 
 function eslesmeleriDisaAktar() {
@@ -413,17 +580,30 @@ function vardiyaEkipEkle(ad, vardiyalar = 'A,B') {
 
 function vardiyaEkipGuncelle(id, { ad, vardiyalar }) {
   if (ad != null) {
-    db.run('UPDATE vardiya_ekip SET ad = :a WHERE id = :id', { ':a': String(ad).trim(), ':id': id });
+    db.run("UPDATE vardiya_ekip SET ad = :a, guncelleme = datetime('now') WHERE id = :id", { ':a': String(ad).trim(), ':id': id });
   }
   if (vardiyalar != null) {
-    db.run('UPDATE vardiya_ekip SET vardiyalar = :v WHERE id = :id',
+    db.run("UPDATE vardiya_ekip SET vardiyalar = :v, guncelleme = datetime('now') WHERE id = :id",
       { ':v': String(vardiyalar), ':id': id });
   }
   return vardiyaEkipler();
 }
 
 function vardiyaEkipSil(id) {
-  db.run('DELETE FROM vardiya_ekip WHERE id = :id', { ':id': id });
+  islem(() => {
+    const e = db.get('SELECT ad FROM vardiya_ekip WHERE id = :id', { ':id': id });
+    if (!e) return;
+    for (const p of db.all('SELECT ad FROM vardiya_personel WHERE ekip_id = :id', { ':id': id })) {
+      mezarYaz('vardiya_personel', anahtarBirlestir(e.ad, p.ad));
+    }
+    for (const v of db.all(
+      `SELECT v.ay, v.gun, p.ad FROM vardiya_kayit v
+       JOIN vardiya_personel p ON p.id = v.personel_id WHERE p.ekip_id = :id`, { ':id': id })) {
+      mezarYaz('vardiya_kayit', anahtarBirlestir(v.ay, e.ad, v.ad, v.gun));
+    }
+    db.run('DELETE FROM vardiya_ekip WHERE id = :id', { ':id': id });
+    mezarYaz('vardiya_ekip', anahtarBirlestir(e.ad));
+  });
 }
 
 function vardiyaPersoneller(ekipId) {
@@ -446,7 +626,18 @@ function vardiyaPersonelEkle(ekipId, ad) {
 }
 
 function vardiyaPersonelSil(id) {
-  db.run('DELETE FROM vardiya_personel WHERE id = :id', { ':id': id });
+  islem(() => {
+    const p = db.get(
+      `SELECT p.ad, e.ad AS ekip FROM vardiya_personel p
+       JOIN vardiya_ekip e ON e.id = p.ekip_id WHERE p.id = :id`, { ':id': id });
+    if (!p) return;
+    for (const v of db.all('SELECT ay, gun FROM vardiya_kayit WHERE personel_id = :id',
+      { ':id': id })) {
+      mezarYaz('vardiya_kayit', anahtarBirlestir(v.ay, p.ekip, p.ad, v.gun));
+    }
+    db.run('DELETE FROM vardiya_personel WHERE id = :id', { ':id': id });
+    mezarYaz('vardiya_personel', anahtarBirlestir(p.ekip, p.ad));
+  });
 }
 
 function vardiyaPersonelTasi(id, yon) {
@@ -459,7 +650,7 @@ function vardiyaPersonelTasi(id, yon) {
   const idler = liste.map((x) => x.id);
   idler.splice(hedef, 0, idler.splice(ix, 1)[0]);
   islem(() => {
-    const st = db.prepare('UPDATE vardiya_personel SET sira = :s WHERE id = :id');
+    const st = db.prepare("UPDATE vardiya_personel SET sira = :s, guncelleme = datetime('now') WHERE id = :id");
     idler.forEach((pid, i) => st.run({ ':s': i + 1, ':id': pid }));
     st.finalize();
   });
@@ -504,7 +695,15 @@ function vardiyaTopluYaz(kayitlar) {
 }
 
 function vardiyaAySil(ay) {
-  db.run('DELETE FROM vardiya_kayit WHERE ay = :a', { ':a': ay });
+  islem(() => {
+    for (const v of db.all(
+      `SELECT v.gun, p.ad, e.ad AS ekip FROM vardiya_kayit v
+       JOIN vardiya_personel p ON p.id = v.personel_id
+       JOIN vardiya_ekip e ON e.id = p.ekip_id WHERE v.ay = :a`, { ':a': ay })) {
+      mezarYaz('vardiya_kayit', anahtarBirlestir(ay, v.ekip, v.ad, v.gun));
+    }
+    db.run('DELETE FROM vardiya_kayit WHERE ay = :a', { ':a': ay });
+  });
 }
 
 function waGruplar() {
@@ -585,14 +784,15 @@ function yol() {
 }
 
 function kapat() {
-  if (db) {
-    try { db.close(); } catch { }
+  if (ham) {
+    try { ham.close(); } catch { }
+    ham = null;
     db = null;
   }
 }
 
 module.exports = {
-  ac, kur, yol, kapat, get raw() { return db; }, islem,
+  ac, kur, yol, kapat, get raw() { return db; }, islem, bekleyisOzeti, baglantiAc,
   isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
   isletmeEkle, isletmeSil, isletmeSirala, isletmeTasi, isletmeSiralaAdlar,
   gunler, aylar, gunVerisi, ayVerisi,

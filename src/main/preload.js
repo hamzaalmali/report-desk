@@ -71,6 +71,13 @@ contextBridge.exposeInMainWorld('api', {
   kilitDurum: () => cagir('kilitDurum'),
   kilitTazele: () => cagir('kilitTazele'),
 
+  ortakDurum: () => cagir('ortakDurum'),
+  ortakSec: () => cagir('ortakSec'),
+  ortakKaldir: () => cagir('ortakKaldir'),
+  ortakAralik: (dk) => cagir('ortakAralik', dk),
+  simdiEsitle: () => cagir('simdiEsitle'),
+  esitlemeDinle: (fn) => { ipcRenderer.on('esitlemeBitti', (_o, veri) => fn(veri)); },
+
   surum: () => cagir('surum'),
   vtDurum: () => cagir('vtDurum'),
   vtOnar: () => cagir('vtOnar'),
