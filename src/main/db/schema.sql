@@ -117,6 +117,12 @@ CREATE TABLE IF NOT EXISTS senkron_durum (
   deger   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS ortak_ayar (
+  anahtar     TEXT PRIMARY KEY,
+  deger       TEXT,
+  guncelleme  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS portal_hesap (
   id          INTEGER PRIMARY KEY,
   numara      TEXT    NOT NULL UNIQUE,

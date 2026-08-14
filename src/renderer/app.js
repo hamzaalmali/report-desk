@@ -1546,6 +1546,8 @@ function waCiz(d) {
         </div>
       </div>
 
+      ${waOrtakBolumu(d)}
+
       <div class="card mt-4">
         <div class="card-head">
           <div class="font-medium">Gruplar</div>
@@ -1612,9 +1614,30 @@ function waCiz(d) {
   });
   bagla('waBaslat', async () => {
     el('waBaslat').disabled = true;
-    try { waCiz(await cagir(api.waBaslat())); }
+    try { waCiz(await cagir(api.waBaslat(false))); }
     catch (e) { bildir(kacar(e.message), 'hata'); waCiz(D.waDurum); }
   });
+  bagla('waZorla', async () => {
+    if (!confirm('Oturum başka bir bilgisayarda açık görünüyor. '
+      + 'Yine de bu bilgisayara alınsın mı?')) return;
+    try { waCiz(await cagir(api.waBaslat(true))); }
+    catch (e) { bildir(kacar(e.message), 'hata'); waCiz(D.waDurum); }
+  });
+  const ortakKutu = el('waOrtak');
+  if (ortakKutu) {
+    ortakKutu.onchange = async () => {
+      try {
+        await cagir(api.waOrtakOturum(ortakKutu.checked));
+        bildir(ortakKutu.checked
+          ? 'Oturum ortak klasöre alındı. Yeniden QR okutmanız gerekebilir.'
+          : 'Oturum bu bilgisayara özel yapıldı.', 'basari');
+        waCiz(await cagir(api.waDurum()));
+      } catch (e) {
+        bildir(kacar(e.message), 'hata');
+        ortakKutu.checked = !ortakKutu.checked;
+      }
+    };
+  }
   bagla('waDurdur', async () => { waCiz(await cagir(api.waDurdur())); });
   bagla('waCikis', async () => {
     if (!confirm('Kayıtlı WhatsApp oturumu silinecek. Yeniden QR okutmanız gerekir. Emin misiniz?')) return;
@@ -1623,6 +1646,57 @@ function waCiz(d) {
       bildir('Oturum silindi.', 'basari');
     } catch (e) { bildir(kacar(e.message), 'hata'); }
   });
+}
+
+function waOrtakBolumu(d) {
+  const s = d.sahiplik || {};
+  const baskasinda = s.ortakMi && s.taze && !s.benMiyim;
+  return `
+    <div class="card mt-4">
+      <div class="card-head">
+        <div>
+          <div class="font-medium">Oturumu ortak kullan</div>
+          <div class="text-[11.5px] text-fg-3">
+            Oturum dosyaları ortak klasörde durur, her bilgisayar aynı bağlantıyı kullanır</div>
+        </div>
+        <span class="chip ${s.ortakMi ? 'border-brand-2/50 text-brand' : 'border-line-2 text-fg-3'}"
+          >${s.ortakMi ? 'ortak' : 'bu bilgisayara özel'}</span>
+      </div>
+      <div class="space-y-3 p-5 text-[12.5px]">
+        <label class="flex items-center gap-2 ${s.ortakKlasorVar ? '' : 'opacity-50'}">
+          <input type="checkbox" id="waOrtak" class="size-4 accent-[#3ecf8e]"
+                 ${s.ortakMi ? 'checked' : ''} ${s.ortakKlasorVar ? '' : 'disabled'} />
+          <span>WhatsApp oturumunu ortak klasörde tut</span>
+        </label>
+        ${s.ortakKlasorVar ? '' : `<div class="text-[11.5px] text-warn">
+          ${svg('uyari', 'inline size-3.5 -mt-0.5')}
+          Önce Ayarlar'dan ortak klasörü seçin.</div>`}
+        <div class="flex justify-between gap-4">
+          <span class="shrink-0 text-fg-2">Oturum klasörü</span>
+          <span class="truncate font-mono text-[11px] text-fg-3">${kacar(s.klasor || d.yol || '')}</span>
+        </div>
+        ${s.ortakMi ? `
+          <div class="flex justify-between gap-4">
+            <span class="shrink-0 text-fg-2">Şu an kimde</span>
+            <span class="text-right">${s.sahip
+              ? `<span class="${s.benMiyim ? 'text-brand' : s.taze ? 'text-warn' : 'text-fg-3'}"
+                   >${kacar(s.sahip)}${s.benMiyim ? ' (bu bilgisayar)' : ''}</span>
+                 <span class="text-fg-3">· ${s.dakika} dk önce bildirdi</span>`
+              : '<span class="text-fg-3">boşta</span>'}</span>
+          </div>
+          ${baskasinda ? `
+            <div class="rounded-md border border-warn/40 bg-warn/10 p-3">
+              <div class="mb-2">Oturum <b>${kacar(s.sahip)}</b> bilgisayarında açık görünüyor.
+                Aynı oturuma iki bilgisayardan bağlanmak bağlantıyı düşürür.</div>
+              <button class="btn btn-sm" id="waZorla">Yine de bu bilgisayara al</button>
+            </div>` : ''}
+          <div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">
+            Bir anda yalnızca <b class="text-fg-2">bir bilgisayar</b> bağlanabilir; diğerleri
+            oturumun kimde olduğunu görür. Bağlantıyı kesince sıra boşa çıkar, 5 dakika ses
+            çıkmazsa da başka bilgisayar devralabilir.
+          </div>` : ''}
+      </div>
+    </div>`;
 }
 
 async function waKomutBagla() {
@@ -1829,7 +1903,11 @@ function portalKarti(ayar, hesaplar) {
           <button class="btn" id="pKlasor">Kayıt klasörünü aç</button>
           <span class="text-[11.5px] ${ayar.kasaVar ? 'text-fg-3' : 'text-warn'}">
             ${ayar.kasaVar
-              ? 'Şifreler bu bilgisayarın kasasında şifrelenerek saklanır.'
+              ? (ayar.ortakAnahtar
+                ? 'Şifreler ortak klasördeki anahtarla şifrelenir; bu ayarlar ve numaralar '
+                  + 'diğer bilgisayarlara da eşitlenir.'
+                : 'Şifreler bu bilgisayarın kasasında şifrelenir. Ortak klasör seçilirse '
+                  + 'diğer bilgisayarlarda da açılacak şekilde yeniden şifrelenir.')
               : 'Bu bilgisayarda işletim sistemi kasası yok — şifreler düz metin saklanır.'}
           </span>
         </div>
@@ -2143,7 +2221,8 @@ async function sayfaAyarlar() {
             belirlenen aralıkla <b class="text-fg-2">iki yönlü birleştirilir</b> — sizin
             girdikleriniz oraya gider, başkalarının girdikleri size gelir.
             Aynı hücreyi ikiniz de değiştirdiyseniz <b class="text-fg-2">en son yapılan</b> kalır.
-            Ayarlar, WhatsApp oturumu ve işlem günlüğü eşitlenmez; onlar her bilgisayara özeldir.
+            Rapor portalı ayarları, portal numaraları ve WhatsApp izinli numaraları da
+            eşitlenir. İşlem günlüğü ve program ayarları her bilgisayara özeldir.
           </div>
         </div>
       </div>

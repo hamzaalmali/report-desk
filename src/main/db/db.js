@@ -102,6 +102,8 @@ const DAMGALI_TABLOLAR = [
   'isletme', 'eslesme', 'gun_kategori', 'vardiya_ekip', 'vardiya_personel', 'vardiya_kayit',
 ];
 
+const TASINAN_AYARLAR = ['waIzinliNumaralar'];
+
 function goc(hedef) {
   for (const tablo of DAMGALI_TABLOLAR) {
     const sutunlar = hedef.all(`PRAGMA table_info(${tablo})`).map((s) => s.name);
@@ -109,6 +111,22 @@ function goc(hedef) {
       hedef.run(`ALTER TABLE ${tablo} ADD COLUMN guncelleme TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
       hedef.run(`UPDATE ${tablo} SET guncelleme = datetime('now')`);
     }
+  }
+  ayarlariTasi(hedef);
+}
+
+function ayarlariTasi(hedef) {
+  const eski = hedef.all(
+    `SELECT anahtar, deger FROM ayar
+     WHERE anahtar LIKE 'portal%' OR anahtar IN (${TASINAN_AYARLAR.map((a) => `'${a}'`).join(', ')})`
+  );
+  for (const r of eski) {
+    hedef.run(
+      `INSERT INTO ortak_ayar (anahtar, deger, guncelleme) VALUES (:a, :d, datetime('now'))
+       ON CONFLICT(anahtar) DO NOTHING`,
+      { ':a': r.anahtar, ':d': r.deger }
+    );
+    hedef.run('DELETE FROM ayar WHERE anahtar = :a', { ':a': r.anahtar });
   }
 }
 
@@ -744,6 +762,20 @@ function ayarYaz(anahtar, deger) {
   return deger;
 }
 
+function ortakAyarOku(anahtar, varsayilan = null) {
+  const r = db.get('SELECT deger FROM ortak_ayar WHERE anahtar = :a', { ':a': anahtar });
+  return r && r.deger != null ? r.deger : varsayilan;
+}
+
+function ortakAyarYaz(anahtar, deger) {
+  db.run(
+    `INSERT INTO ortak_ayar (anahtar, deger, guncelleme) VALUES (:a, :d, datetime('now'))
+     ON CONFLICT(anahtar) DO UPDATE SET deger = excluded.deger, guncelleme = excluded.guncelleme`,
+    { ':a': anahtar, ':d': deger == null ? null : String(deger) }
+  );
+  return deger;
+}
+
 function portalHesaplar() {
   return db.all(
     `SELECT id, numara, ad, kullanici, aktif,
@@ -759,7 +791,9 @@ function portalHesap(numara) {
 function portalHesapYaz({ id, numara, ad, kullanici, sifre, sifreli, aktif }) {
   const mevcut = id ? db.get('SELECT * FROM portal_hesap WHERE id = :i', { ':i': id }) : null;
   const yeniSifre = sifre == null ? (mevcut ? mevcut.sifre : '') : sifre;
-  const yeniSifreli = sifre == null ? (mevcut ? mevcut.sifreli : 0) : (sifreli ? 1 : 0);
+  const yeniSifreli = sifre == null
+    ? (mevcut ? mevcut.sifreli : 0)
+    : (Number(sifreli) || 0);
 
   if (mevcut) {
     db.run(
@@ -787,7 +821,12 @@ function portalHesapYaz({ id, numara, ad, kullanici, sifre, sifreli, aktif }) {
 }
 
 function portalHesapSil(id) {
-  db.run('DELETE FROM portal_hesap WHERE id = :i', { ':i': id });
+  islem(() => {
+    const h = db.get('SELECT numara FROM portal_hesap WHERE id = :i', { ':i': id });
+    if (!h) return;
+    db.run('DELETE FROM portal_hesap WHERE id = :i', { ':i': id });
+    mezarYaz('portal_hesap', anahtarBirlestir(h.numara));
+  });
   return portalHesaplar();
 }
 
@@ -861,6 +900,6 @@ module.exports = {
   vardiyaPersoneller, vardiyaPersonelEkle, vardiyaPersonelSil, vardiyaPersonelTasi,
   vardiyaAyVerisi, vardiyaAylar, vardiyaYaz, vardiyaTopluYaz, vardiyaAySil,
   waGruplar, waGruplariYaz, waGrupSec, waSeciliGruplar,
-  ayarOku, ayarYaz,
+  ayarOku, ayarYaz, ortakAyarOku, ortakAyarYaz,
   portalHesaplar, portalHesap, portalHesapYaz, portalHesapSil,
 };

@@ -508,12 +508,41 @@ async function main() {
     kontrol('ana sayfa adresi giriş adresinden türetiliyor',
       y.anaUrl === 'https://ornek.test/default.aspx', y.anaUrl);
     kontrol('kaydedilmemiş ayar bozulmuyor',
-      portalAyar.oku(db).altMenuXpath.includes('leftsidenav'));
+      portalAyar.oku(db).altMenuXpath.endsWith('/ul/li[7]/ul/li[1]/a'),
+      portalAyar.oku(db).altMenuXpath);
     kontrol('ayarlar eksiksizken uyarı yok', portalAyar.dogrula(y).length === 0);
+
+    db.ortakAyarYaz('portalMenuXpath', portalAyar.ESKIYEN.menuXpath[0]);
+    kontrol('eskiyen menü yolu yeni varsayılana dönüyor',
+      portalAyar.oku(db).menuXpath === '/html/body/form/div[3]/div/div/div[1]/ul/li[7]',
+      portalAyar.oku(db).menuXpath);
+    db.ortakAyarYaz('portalMenuXpath', '//özel/yol');
+    kontrol('kullanıcının yazdığı menü yolu korunuyor',
+      portalAyar.oku(db).menuXpath === '//özel/yol');
+    db.ortakAyarYaz('portalMenuXpath', '');
+
+    kontrol('portal ayarları eşitlenen tabloda duruyor',
+      db.raw.get("SELECT COUNT(*) AS n FROM ortak_ayar WHERE anahtar LIKE 'portal%'").n > 0);
 
     const s = kasa.sifrele('gizli-123');
     kontrol('şifre kasadan geçip aynı dönüyor', kasa.coz(s.deger, s.sifreli) === 'gizli-123');
     kontrol('boş şifre boş kalıyor', kasa.sifrele('').deger === '');
+
+    kasa.kur(() => Buffer.alloc(32, 7));
+    const o = kasa.sifrele('ortak-gizli');
+    kontrol('ortak anahtar varken o şema kullanılıyor', o.sifreli === kasa.ORTAK);
+    kontrol('ortak anahtarla şifrelenen çözülüyor', kasa.coz(o.deger, o.sifreli) === 'ortak-gizli');
+    kontrol('şifrelenmiş metin düz görünmüyor', !o.deger.includes('ortak-gizli'));
+    kasa.kur(() => Buffer.alloc(32, 9));
+    let yanlisAnahtarHatasi = false;
+    try { kasa.coz(o.deger, o.sifreli); } catch { yanlisAnahtarHatasi = true; }
+    kontrol('yanlış anahtarla çözülemiyor', yanlisAnahtarHatasi);
+    kasa.kur(() => null);
+    let anahtarsizHata = false;
+    try { kasa.coz(o.deger, kasa.ORTAK); } catch { anahtarsizHata = true; }
+    kontrol('anahtar yokken anlaşılır hata veriyor', anahtarsizHata);
+    kontrol('yerel şema ortak sayılmıyor',
+      kasa.paylasilirMi(kasa.ORTAK) && !kasa.paylasilirMi(kasa.YEREL));
 
     db.portalHesapYaz({
       numara: '905551112233', ad: 'Deneme', kullanici: 'kadi',
@@ -538,6 +567,33 @@ async function main() {
 
     db.portalHesapSil(db.portalHesap('905551112233').id);
     kontrol('hesap silinebiliyor', db.portalHesaplar().length === 0);
+
+    {
+      const oncekiYol = db.yol();
+      const gecici = fs.mkdtempSync(path.join(os.tmpdir(), 'goc-'));
+      const eskiVt = path.join(gecici, 'eski.sqlite');
+      db.ac(eskiVt);
+      db.raw.run('DELETE FROM ortak_ayar');
+      db.ayarYaz('portalGirisUrl', 'https://eski.test/Login.aspx');
+      db.ayarYaz('portalRaporAdi', 'Eski Rapor');
+      db.ayarYaz('waIzinliNumaralar', '905551112233');
+      db.ayarYaz('ilkKurulum', 'dokunma');
+      db.kapat();
+
+      db.ac(eskiVt);
+      const g = portalAyar.oku(db);
+      kontrol('yükseltmede eski portal ayarları taşınıyor',
+        g.girisUrl === 'https://eski.test/Login.aspx' && g.raporAdi === 'Eski Rapor',
+        JSON.stringify(g));
+      kontrol('yükseltmede izinli numaralar taşınıyor',
+        db.ortakAyarOku('waIzinliNumaralar') === '905551112233');
+      kontrol('taşınan ayar eski tablodan siliniyor',
+        db.ayarOku('portalGirisUrl') === null);
+      kontrol('program ayarlarına dokunulmuyor', db.ayarOku('ilkKurulum') === 'dokunma');
+      db.kapat();
+      fs.rmSync(gecici, { recursive: true, force: true });
+      if (oncekiYol) db.ac(oncekiYol);
+    }
 
     const a = portal.tarihAraligi(1, new Date(2026, 0, 1));
     kontrol('tarih aralığı bir gün geriden başlıyor',
@@ -581,6 +637,42 @@ async function main() {
     kontrol('mesaj metni her biçimden okunuyor',
       metin({ conversation: 'hava durumu' }) === 'hava durumu'
       && metin({ extendedTextMessage: { text: 'hava durumu' } }) === 'hava durumu');
+  }
+
+  console.log('\nOrtak WhatsApp oturumu');
+  {
+    const sahiplik = require('../src/main/whatsapp/sahiplik');
+    const klasor = fs.mkdtempSync(path.join(os.tmpdir(), 'oturum-'));
+
+    kontrol('boş klasörde sahip yok',
+      sahiplik.durum(klasor, 'A-PC').bos && sahiplik.alinabilirMi(klasor, 'A-PC'));
+
+    sahiplik.al(klasor, 'A-PC');
+    const aDurum = sahiplik.durum(klasor, 'A-PC');
+    kontrol('sahiplik alınıyor ve kendini tanıyor',
+      aDurum.sahip === 'A-PC' && aDurum.benMiyim && aDurum.taze);
+    kontrol('başka bilgisayar taze sahipliği alamıyor',
+      !sahiplik.alinabilirMi(klasor, 'B-PC'));
+    const bDurum = sahiplik.durum(klasor, 'B-PC');
+    kontrol('başka bilgisayar sahibi görüyor',
+      bDurum.sahip === 'A-PC' && !bDurum.benMiyim && bDurum.taze);
+
+    const eski = JSON.parse(fs.readFileSync(path.join(klasor, sahiplik.DOSYA), 'utf8'));
+    fs.writeFileSync(path.join(klasor, sahiplik.DOSYA),
+      JSON.stringify({ ...eski, zaman: Date.now() - sahiplik.TAZELIK - 1000 }));
+    kontrol('ses çıkmayan sahiplik devralınabiliyor', sahiplik.alinabilirMi(klasor, 'B-PC'));
+
+    sahiplik.al(klasor, 'B-PC');
+    kontrol('devralınca sahip değişiyor', sahiplik.durum(klasor, 'B-PC').benMiyim);
+    kontrol('sahibi olmayan bırakamıyor',
+      sahiplik.birak(klasor, 'A-PC').sahip === 'B-PC');
+    kontrol('sahibi bırakınca sıra boşalıyor',
+      sahiplik.birak(klasor, 'B-PC').bos && sahiplik.alinabilirMi(klasor, 'A-PC'));
+
+    fs.writeFileSync(path.join(klasor, sahiplik.DOSYA), 'bozuk içerik');
+    kontrol('bozuk sahip dosyası kilit yaratmıyor', sahiplik.alinabilirMi(klasor, 'A-PC'));
+
+    fs.rmSync(klasor, { recursive: true, force: true });
   }
 
   console.log('\nOrtak klasör ayarları');
@@ -733,6 +825,58 @@ async function main() {
     kontrol('silmeden sonra da kararlı',
       bos2.gonderilen === 0 && bos2.alinan === 0
       && bos2.yerelSilinen === 0 && bos2.ortakSilinen === 0, JSON.stringify(bos2));
+
+    const damgala = (zaman) => {
+      db.raw.run('UPDATE ortak_ayar SET guncelleme = :z', { ':z': zaman });
+      db.raw.run('UPDATE portal_hesap SET guncelleme = :z', { ':z': zaman });
+    };
+
+    db.ac(A);
+    db.ortakAyarYaz('portalRaporAdi', 'A Raporu');
+    db.ortakAyarYaz('waIzinliNumaralar', '905551112233');
+    db.portalHesapYaz({
+      numara: '905551112233', ad: 'A Kişi', kullanici: 'a-kullanici',
+      sifre: 'ŞIFRELI-METIN', sifreli: 2, aktif: true,
+    });
+    damgala('2026-08-01 08:00:00');
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+
+    db.ac(B);
+    const gelenAyar = db.ortakAyarOku('portalRaporAdi');
+    const gelenIzin = db.ortakAyarOku('waIzinliNumaralar');
+    const gelenHesap = db.portalHesap('905551112233');
+    db.kapat();
+    kontrol('portal ayarı diğer bilgisayara geçti', gelenAyar === 'A Raporu', String(gelenAyar));
+    kontrol('izinli numaralar diğer bilgisayara geçti', gelenIzin === '905551112233');
+    kontrol('portal numarası kullanıcı adıyla birlikte geçti',
+      !!gelenHesap && gelenHesap.kullanici === 'a-kullanici' && gelenHesap.aktif === 1,
+      JSON.stringify(gelenHesap));
+    kontrol('şifre şifreli hâliyle taşındı',
+      !!gelenHesap && gelenHesap.sifre === 'ŞIFRELI-METIN' && gelenHesap.sifreli === 2);
+
+    db.ac(B);
+    db.ortakAyarYaz('portalRaporAdi', 'B Raporu');
+    db.raw.run("UPDATE ortak_ayar SET guncelleme = '2026-08-01 09:00:00'"
+      + " WHERE anahtar = 'portalRaporAdi'");
+    db.kapat();
+    esitleyi(B);
+    esitleyi(A);
+    db.ac(A);
+    const sonAyar = db.ortakAyarOku('portalRaporAdi');
+    db.kapat();
+    kontrol('ayarda da son yazan kazanıyor', sonAyar === 'B Raporu', String(sonAyar));
+
+    db.ac(A);
+    db.portalHesapSil(db.portalHesap('905551112233').id);
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+    db.ac(B);
+    const silindi = db.portalHesap('905551112233');
+    db.kapat();
+    kontrol('portal numarası silinince diğerinden de siliniyor', !silindi);
 
     db.kapat();
     if (oncekiYol) db.ac(oncekiYol);

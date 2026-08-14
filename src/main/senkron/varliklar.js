@@ -225,6 +225,60 @@ const VARLIKLAR = [
   },
 
   {
+    tur: 'ortak_ayar',
+    oku(db) {
+      return db.all('SELECT anahtar, deger, guncelleme FROM ortak_ayar').map((r) => ({
+        anahtar: anahtarla(r.anahtar),
+        guncelleme: r.guncelleme,
+        veri: { anahtar: r.anahtar, deger: r.deger },
+      }));
+    },
+    yaz(db, s) {
+      db.run(
+        `INSERT INTO ortak_ayar (anahtar, deger, guncelleme) VALUES (:a, :d, :g)
+         ON CONFLICT(anahtar) DO UPDATE SET deger = excluded.deger,
+           guncelleme = excluded.guncelleme`,
+        { ':a': s.veri.anahtar, ':d': s.veri.deger, ':g': s.guncelleme }
+      );
+    },
+    sil(db, anahtar) {
+      db.run('DELETE FROM ortak_ayar WHERE anahtar = :a', { ':a': anahtar });
+    },
+  },
+
+  {
+    tur: 'portal_hesap',
+    oku(db) {
+      const sorgu = `SELECT numara, ad, kullanici, sifre, sifreli, aktif, guncelleme
+                     FROM portal_hesap`;
+      return db.all(sorgu).map((r) => ({
+        anahtar: anahtarla(r.numara),
+        guncelleme: r.guncelleme,
+        veri: {
+          numara: r.numara, ad: r.ad, kullanici: r.kullanici,
+          sifre: r.sifre, sifreli: r.sifreli, aktif: r.aktif,
+        },
+      }));
+    },
+    yaz(db, s) {
+      db.run(
+        `INSERT INTO portal_hesap (numara, ad, kullanici, sifre, sifreli, aktif, guncelleme)
+         VALUES (:n, :ad, :k, :s, :sl, :a, :g)
+         ON CONFLICT(numara) DO UPDATE SET ad = excluded.ad, kullanici = excluded.kullanici,
+           sifre = excluded.sifre, sifreli = excluded.sifreli, aktif = excluded.aktif,
+           guncelleme = excluded.guncelleme`,
+        {
+          ':n': s.veri.numara, ':ad': s.veri.ad, ':k': s.veri.kullanici,
+          ':s': s.veri.sifre, ':sl': s.veri.sifreli, ':a': s.veri.aktif, ':g': s.guncelleme,
+        }
+      );
+    },
+    sil(db, anahtar) {
+      db.run('DELETE FROM portal_hesap WHERE numara = :n', { ':n': anahtar });
+    },
+  },
+
+  {
     tur: 'vardiya_kayit',
     oku(db) {
       const sorgu = `SELECT v.ay, v.gun, v.kod, v.guncelleme, p.ad, e.ad AS ekip

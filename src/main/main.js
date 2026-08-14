@@ -19,6 +19,7 @@ const ortak = require('./ortak');
 const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
 const kasa = require('./portal/kasa');
+const sahiplik = require('./whatsapp/sahiplik');
 const senkron = require('./senkron/senkron');
 const { guncellemeyiKur, guncellemeKontrol } = require('./updater');
 
@@ -270,20 +271,22 @@ app.whenReady().then(() => {
     hataYaz('uzak durum kurulumu', e);
   }
   try {
-    wa.kur(
-      path.join(app.getPath('userData'), 'whatsapp-oturum'),
-      (d) => {
-        if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
-      },
-      komut.olustur({
-        izinliler: () => izinliNumaralar(),
-        log: kayit,
-        ekIzin: (numara) => portalHesabiVar(numara),
-        servisler: { rapor: (b) => waRaporKomutu(b) },
-      }),
-      kayit
-    );
-    if (wa.oturumVarMi()) wa.baslat().catch((e) => hataYaz('whatsapp başlangıç', e));
+    kasa.kur(() => ortakAnahtar());
+    if (!dbHatasi) hesaplariOrtaklastir();
+  } catch (e) {
+    hataYaz('şifre kasası', e);
+  }
+  try {
+    const klasor = waKur();
+    kayit(`WhatsApp oturum klasörü: ${klasor}${waOrtakMi() ? ' (ortak)' : ''}`);
+    if (wa.oturumVarMi()) {
+      const d = waSahiplikDurumu();
+      if (!d.ortakMi || d.bos || d.benMiyim) {
+        waBaslatKontrollu().catch((e) => hataYaz('whatsapp başlangıç', e));
+      } else {
+        kayit(`WhatsApp başlatılmadı: oturum "${d.sahip}" bilgisayarında açık görünüyor.`);
+      }
+    }
   } catch (e) {
     hataYaz('whatsapp kurulumu', e);
   }
@@ -304,11 +307,160 @@ app.on('window-all-closed', () => {
 
 function izinliNumaralar() {
   try {
-    const r = db.raw.get("SELECT deger FROM ayar WHERE anahtar = 'waIzinliNumaralar'");
-    if (r && r.deger != null && String(r.deger).trim()) return String(r.deger);
+    const d = db.ortakAyarOku('waIzinliNumaralar');
+    if (d != null && String(d).trim()) return String(d);
   } catch { }
   return komut.VARSAYILAN_NUMARALAR;
 }
+
+const ANAHTAR_DOSYASI = 'anahtar.key';
+let anahtarOnbellek = null;
+
+function ortakAnahtar() {
+  const dosya = ortak.ortakDosya();
+  if (!dosya) { anahtarOnbellek = null; return null; }
+  const yol = path.join(path.dirname(dosya), ANAHTAR_DOSYASI);
+  if (anahtarOnbellek && anahtarOnbellek.yol === yol) return anahtarOnbellek.anahtar;
+  try {
+    let ham;
+    if (fs.existsSync(yol)) {
+      ham = Buffer.from(String(fs.readFileSync(yol, 'utf8')).trim(), 'base64');
+    } else {
+      ham = require('node:crypto').randomBytes(32);
+      fs.mkdirSync(path.dirname(yol), { recursive: true });
+      fs.writeFileSync(yol, ham.toString('base64'), 'utf8');
+      kayit(`Ortak şifre anahtarı oluşturuldu: ${yol}`);
+    }
+    if (ham.length !== 32) return null;
+    anahtarOnbellek = { yol, anahtar: ham };
+    return ham;
+  } catch (e) {
+    hataYaz('ortak anahtar', e);
+    return null;
+  }
+}
+
+function hesaplariOrtaklastir() {
+  if (!ortakAnahtar()) return 0;
+  let sayi = 0;
+  try {
+    for (const h of db.raw.all(
+      'SELECT id, numara, sifre, sifreli FROM portal_hesap WHERE sifreli = :y',
+      { ':y': kasa.YEREL }
+    )) {
+      let acik;
+      try { acik = kasa.coz(h.sifre, h.sifreli); } catch { continue; }
+      const yeni = kasa.sifrele(acik);
+      if (yeni.sifreli !== kasa.ORTAK) continue;
+      db.raw.run(
+        `UPDATE portal_hesap SET sifre = :s, sifreli = :sl, guncelleme = datetime('now')
+         WHERE id = :i`,
+        { ':s': yeni.deger, ':sl': yeni.sifreli, ':i': h.id }
+      );
+      sayi++;
+    }
+    if (sayi) kayit(`${sayi} portal şifresi ortak anahtarla yeniden şifrelendi.`);
+  } catch (e) {
+    hataYaz('şifre ortaklaştırma', e);
+  }
+  return sayi;
+}
+
+function waOrtakMi() {
+  try {
+    return db.ortakAyarOku('waOrtakOturum') === '1' && !!ortak.ortakDosya();
+  } catch {
+    return false;
+  }
+}
+
+function waOturumKlasoru() {
+  if (waOrtakMi()) {
+    return path.join(path.dirname(ortak.ortakDosya()), 'whatsapp-oturum');
+  }
+  return path.join(app.getPath('userData'), 'whatsapp-oturum');
+}
+
+let waKalpAtisi = null;
+
+function waSahiplikDurumu() {
+  const ortakMi = waOrtakMi();
+  const klasor = waOturumKlasoru();
+  const ben = ortak.makineAdi();
+  return {
+    ortakMi,
+    klasor,
+    makine: ben,
+    ortakKlasorVar: !!ortak.ortakDosya(),
+    ...(ortakMi ? sahiplik.durum(klasor, ben) : { sahip: ben, benMiyim: true, taze: true, bos: false }),
+  };
+}
+
+function waKalbiDurdur() {
+  clearInterval(waKalpAtisi);
+  waKalpAtisi = null;
+}
+
+function waKalbiBaslat() {
+  waKalbiDurdur();
+  if (!waOrtakMi()) return;
+  waKalpAtisi = setInterval(() => {
+    try {
+      if (wa.durumAl().asama === 'bagli') sahiplik.tazele(waOturumKlasoru(), ortak.makineAdi());
+    } catch { }
+  }, 60000);
+}
+
+function waKur() {
+  const klasor = waOturumKlasoru();
+  wa.kur(
+    klasor,
+    (d) => {
+      if (pencere && !pencere.isDestroyed()) {
+        pencere.webContents.send('waDurum', { ...d, sahiplik: waSahiplikDurumu() });
+      }
+    },
+    komut.olustur({
+      izinliler: () => izinliNumaralar(),
+      log: kayit,
+      ekIzin: (numara) => portalHesabiVar(numara),
+      servisler: { rapor: (b) => waRaporKomutu(b) },
+    }),
+    kayit
+  );
+  return klasor;
+}
+
+async function waBaslatKontrollu(zorla = false) {
+  if (waOrtakMi()) {
+    const ben = ortak.makineAdi();
+    const klasor = waOturumKlasoru();
+    const d = sahiplik.durum(klasor, ben);
+    if (!zorla && d.taze && !d.benMiyim) {
+      throw new Error(`WhatsApp oturumu şu an "${d.sahip}" bilgisayarında açık `
+        + `(${d.dakika} dakika önce bildirdi). Aynı oturuma iki bilgisayardan bağlanmak `
+        + 'oturumu düşürür. Oradan kapatın ya da "Bu bilgisayara al" deyin.');
+    }
+    sahiplik.al(klasor, ben);
+  }
+  try {
+    const sonuc = await wa.baslat();
+    waKalbiBaslat();
+    return sonuc;
+  } catch (e) {
+    if (waOrtakMi()) sahiplik.birak(waOturumKlasoru(), ortak.makineAdi());
+    throw e;
+  }
+}
+
+app.on('before-quit', () => {
+  waKalbiDurdur();
+  try {
+    if (waOrtakMi() && wa.durumAl().asama !== 'kapali') {
+      sahiplik.birak(waOturumKlasoru(), ortak.makineAdi());
+    }
+  } catch { }
+});
 
 function portalHesabiVar(numara) {
   try {
@@ -518,6 +670,9 @@ function esitlemeyiCalistir(elle = false) {
     };
     ortak.sonEsitlemeYaz(kayitNesnesi);
     ortak.varlikBildir(dosya, app.getVersion());
+    try {
+      if (wa.durumAl().asama === 'kapali' && wa.durumAl().yol !== waOturumKlasoru()) waKur();
+    } catch { }
     kayit(`Eşitleme tamam (${kayitNesnesi.sureMs} ms): gönderilen ${sayac.gonderilen}, `
       + `alınan ${sayac.alinan}, silinen ${sayac.yerelSilinen + sayac.ortakSilinen}`);
     if (pencere && !pencere.isDestroyed()) {
@@ -562,7 +717,9 @@ kanal('ortakSec', async () => {
   if (r.canceled) return null;
   const dosya = path.join(r.filePaths[0], 'veri-ortak.sqlite');
   ortak.ortakAyarla(dosya);
+  anahtarOnbellek = null;
   kayit(`Ortak klasör seçildi: ${dosya}`);
+  if (!dbHatasi) hesaplariOrtaklastir();
   zamanlayiciyiKur();
   esitlemeyiCalistir(true);
   return ortakDurum();
@@ -570,7 +727,15 @@ kanal('ortakSec', async () => {
 
 kanal('ortakKaldir', () => {
   ortak.ortakKaldir();
+  anahtarOnbellek = null;
   clearInterval(esitlemeSayaci);
+  if (!dbHatasi) {
+    try {
+      db.ortakAyarYaz('waOrtakOturum', '0');
+      waKalbiDurdur();
+      waKur();
+    } catch (e) { hataYaz('ortak oturum kapatma', e); }
+  }
   kayit('Ortak klasör bağlantısı kaldırıldı.');
   return ortakDurum();
 }, true);
@@ -739,15 +904,36 @@ kanal('vardiyaExcel', async (ay) => {
   return r.filePath;
 });
 
-kanal('waDurum', () => wa.durumAl(), true);
-kanal('waBaslat', () => wa.baslat(), true);
-kanal('waDurdur', () => wa.durdur(), true);
-kanal('waCikis', () => wa.cikisYap(), true);
+kanal('waDurum', () => ({ ...wa.durumAl(), sahiplik: waSahiplikDurumu() }), true);
+kanal('waBaslat', (zorla) => waBaslatKontrollu(!!zorla), true);
+kanal('waDurdur', async () => {
+  waKalbiDurdur();
+  const d = await wa.durdur();
+  if (waOrtakMi()) sahiplik.birak(waOturumKlasoru(), ortak.makineAdi());
+  return d;
+}, true);
+kanal('waCikis', async () => {
+  waKalbiDurdur();
+  const d = await wa.cikisYap();
+  if (waOrtakMi()) sahiplik.birak(waOturumKlasoru(), ortak.makineAdi());
+  return d;
+}, true);
+
+kanal('waOrtakOturum', (acik) => {
+  if (acik && !ortak.ortakDosya()) throw new Error('Önce ortak klasör seçilmeli.');
+  if (wa.durumAl().asama !== 'kapali') {
+    throw new Error('Önce WhatsApp bağlantısını kesin, sonra bu ayarı değiştirin.');
+  }
+  db.ortakAyarYaz('waOrtakOturum', acik ? '1' : '0');
+  waKalbiDurdur();
+  const klasor = waKur();
+  kayit(`WhatsApp oturum klasörü değişti: ${klasor}`);
+  return waSahiplikDurumu();
+});
 
 kanal('waIzinliler', () => izinliNumaralar());
 kanal('waIzinlileriYaz', (metin) => {
-  db.raw.run("INSERT OR REPLACE INTO ayar (anahtar, deger) VALUES ('waIzinliNumaralar', :d)",
-    { ':d': String(metin || '') });
+  db.ortakAyarYaz('waIzinliNumaralar', String(metin || ''));
   return izinliNumaralar();
 });
 kanal('havaDenemesi', () => mgm.havaMetni());
@@ -805,6 +991,7 @@ kanal('waGonder', async (istek) => {
 kanal('portalAyar', () => ({
   ...portalAyarlari(),
   kasaVar: kasa.kullanilabilir(),
+  ortakAnahtar: !!ortakAnahtar(),
   klasor: PORTAL_KLASORU(),
 }));
 kanal('portalAyarYaz', (gelen) => portalAyar.yaz(db, gelen || {}));

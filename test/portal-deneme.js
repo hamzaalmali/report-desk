@@ -41,18 +41,27 @@ const ONAY = SAYFA('Onay Kodu', `
     <input id="btnOnay" type="submit" value="Onayla" />
   </form>`);
 
+const MENU_XPATH = '/html/body/form/div[3]/div/div/div[1]/ul/li[7]';
+
 const ANA = SAYFA('Ana Sayfa', `
-  <ul id="leftsidenav">
-    ${[1, 2, 3, 4, 5, 6].map((n) => `<li><a href="javascript:void(0)">Menü ${n}</a></li>`).join('')}
-    <li>
-      <a href="javascript:void(0)" onclick="document.getElementById('altmenu').style.display='block'"
-         >Raporlar</a>
-      <ul id="altmenu" style="display:none">
-        <li><a href="/Rapor.aspx" onclick="return document.getElementById('altmenu').style.display==='block'"
-               >Raporlar</a></li>
+  <form>
+    <div>üst şerit</div>
+    <div>ikinci şerit</div>
+    <div><div><div><div>
+      <ul>
+        ${[1, 2, 3, 4, 5, 6].map((n) => `<li class="sub1"><a href="javascript:void(0)"
+          >Menü ${n}</a></li>`).join('')}
+        <li class="sub1 t-indent" onclick="this.querySelector('ul').style.display='block'"
+          >RAPORLAR<ul id="altmenu" style="display:none">
+            <li><a class="mlink" href="/Rapor.aspx" target="content">Raporlar</a></li>
+            <li><a class="mlink" href="/Kuyruk.aspx" target="content">Rapor Kuyruğu</a></li>
+          </ul></li>
       </ul>
-    </li>
-  </ul>`);
+    </div></div></div></div>
+    <iframe name="content" src="/bos.aspx" style="width:900px;height:500px"></iframe>
+  </form>`);
+
+const BOS = SAYFA('Bos', '<div>hoş geldiniz</div>');
 
 const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
   <h1>Rapor</h1>
@@ -149,6 +158,7 @@ function sunucuKur(kayit) {
     }
     if (url.pathname === '/Onay.aspx') return yolla(ONAY);
     if (url.pathname === '/default.aspx') return yolla(ANA);
+    if (url.pathname === '/bos.aspx') return yolla(BOS);
     if (url.pathname === '/Rapor.aspx') return yolla(RAPOR_SAYFASI);
     return yolla(GIRIS);
   });
@@ -184,8 +194,8 @@ app.whenReady().then(async () => {
         onaySn: 30,
         gorunur,
         kapat: true,
-        menuXpath: '//*[@id="leftsidenav"]/li[7]',
-        altMenuXpath: '//*[@id="leftsidenav"]/li[7]/ul/li[1]/a',
+        menuXpath: MENU_XPATH,
+        altMenuXpath: `${MENU_XPATH}/ul/li[1]/a`,
       },
       kokKlasor: klasor,
       onayKodu: async (deneme) => { onaySorulari.push(deneme); return KOD; },
@@ -227,12 +237,19 @@ app.whenReady().then(async () => {
     const dosyalar = fs.readdirSync(sonuc.klasor);
     const htmlSayisi = dosyalar.filter((d) => d.endsWith('.html')).length;
     const pngSayisi = dosyalar.filter((d) => d.endsWith('.png')).length;
-    kontrol('her adımın HTML kaydı alındı', htmlSayisi === 8, `${htmlSayisi} html`);
+    kontrol('her adımın HTML kaydı alındı', htmlSayisi >= 8, `${htmlSayisi} html`);
     kontrol('her adımın ekran görüntüsü alındı', pngSayisi === 8, `${pngSayisi} png`);
+    kontrol('iframe içeriği ayrıca kaydedildi',
+      dosyalar.some((d) => d.includes('--cerceve1.html')),
+      dosyalar.filter((d) => d.endsWith('.html')).join(' '));
     kontrol('kayıt dosyaları sayfa adıyla adlandırıldı',
       dosyalar.some((d) => d.includes('Kullanici-Girisi'))
-      && dosyalar.some((d) => d.includes('Rapor-Ekrani')),
+      && dosyalar.some((d) => d.includes('Ana-Sayfa')),
       dosyalar.join(' '));
+    const menuAdimi = adimlar.find((a) => a.kod === 'raporlar-menu');
+    kontrol('rapor ekranı iframe içinde bulundu',
+      !!menuAdimi && menuAdimi.iz.cerceve >= 2 && /Rapor\.aspx$/.test(menuAdimi.sonuc.url || ''),
+      menuAdimi && `${menuAdimi.iz.cerceve} çerçeve, ${menuAdimi.sonuc.url}`);
     kontrol('özet dosyası yazıldı', dosyalar.includes('ozet.json'));
 
     const girisHtml = fs.readFileSync(

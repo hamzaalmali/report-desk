@@ -297,15 +297,61 @@ async function calistir(istek) {
     if (pencereKapandi) throw new Error('Tarayıcı penceresi kapatıldı.');
   };
 
-  const js = async (kod) => {
-    kontrol();
-    return pencere.webContents.executeJavaScript(`${YARDIM}\n${kod}`, true);
+  const anaCerceve = () => pencere.webContents.mainFrame;
+
+  const cerceveler = () => {
+    try {
+      const a = anaCerceve();
+      const hepsi = a.framesInSubtree || [a];
+      return hepsi.length ? hepsi : [a];
+    } catch {
+      return [];
+    }
   };
 
-  const dene = async (ifade) => {
-    try { return await js(`(function () { try { return (${ifade}); } catch (e) { return null; } })()`); }
-    catch { return null; }
+  let aktifCerceve = null;
+
+  const jsC = async (cerceve, kod) => {
+    kontrol();
+    return cerceve.executeJavaScript(`${YARDIM}\n${kod}`, true);
   };
+
+  const deneC = async (cerceve, ifade) => {
+    try {
+      return await jsC(cerceve, `(function () { try { return (${ifade}); } catch (e) { return null; } })()`);
+    } catch {
+      return null;
+    }
+  };
+
+  const cerceveAra = async (ifade, sure, aciklama) => {
+    const bitis = Date.now() + sure;
+    while (Date.now() < bitis) {
+      kontrol();
+      for (const c of cerceveler()) {
+        if (await deneC(c, ifade)) return c;
+      }
+      await uyu(300);
+    }
+    throw new Error(`Beklenen aşamaya ulaşılamadı: ${aciklama}`);
+  };
+
+  const cerceveSec = async (ifade, aciklama, sure = OGE_SURESI) => {
+    const c = await cerceveAra(ifade, sure, aciklama);
+    aktifCerceve = { cerceve: c, ifade };
+    return c;
+  };
+
+  const cerceve = async () => {
+    if (!aktifCerceve) return anaCerceve();
+    if (await deneC(aktifCerceve.cerceve, '1')) return aktifCerceve.cerceve;
+    aktifCerceve.cerceve = await cerceveAra(aktifCerceve.ifade, 15000, 'çerçeve kayboldu');
+    return aktifCerceve.cerceve;
+  };
+
+  const js = async (kod) => jsC(await cerceve(), kod);
+
+  const dene = async (ifade) => deneC(await cerceve(), ifade);
 
   const bekle = async (ifade, aciklama, sure = OGE_SURESI) => {
     const bitis = Date.now() + sure;
@@ -336,20 +382,27 @@ async function calistir(istek) {
     let baslik = '';
     let url = '';
     try {
-      baslik = await pencere.webContents.executeJavaScript('document.title', true);
+      baslik = await deneC(anaCerceve(), 'document.title') || '';
       url = pencere.webContents.getURL();
     } catch { }
     const taban = `${ikiHane(sira)}-${kod}${baslik ? '-' + dosyaAdiTemiz(baslik) : ''}`;
-    let html = null;
-    try {
-      html = await pencere.webContents.executeJavaScript('document.documentElement.outerHTML', true);
-      fs.writeFileSync(path.join(klasor, taban + '.html'), gizle(html, gizliler), 'utf8');
-    } catch { }
+
+    const yazilan = [];
+    const liste = cerceveler();
+    for (let i = 0; i < liste.length; i++) {
+      const html = await deneC(liste[i], 'document.documentElement.outerHTML');
+      if (!html) continue;
+      const ek = i === 0 ? '' : `--cerceve${i}`;
+      try {
+        fs.writeFileSync(path.join(klasor, taban + ek + '.html'), gizle(html, gizliler), 'utf8');
+        yazilan.push(taban + ek + '.html');
+      } catch { }
+    }
     try {
       const resim = await pencere.webContents.capturePage();
       fs.writeFileSync(path.join(klasor, taban + '.png'), resim.toPNG());
     } catch { }
-    return { dosya: taban, baslik, url, uzunluk: html ? html.length : 0 };
+    return { dosya: taban, baslik, url, cerceve: liste.length, dosyalar: yazilan };
   };
 
   const adim = async (kod, ad, fn) => {
@@ -380,11 +433,41 @@ async function calistir(istek) {
 
   const aralik = tarihAraligi(ayarlar.gunGeri);
 
+  const ONAY_GORUNUR = `(function () { var o = window.__rd.bul(${JSON.stringify(ALAN.onayKodu)});`
+    + ' return !!(o && window.__rd.gorunur(o)); })()';
+  const GIRIS_VAR = `!!window.__rd.bul(${JSON.stringify(ALAN.giris)})`;
+
+  const girisiBekle = async (sure = 45000) => {
+    const bitis = Date.now() + sure;
+    while (Date.now() < bitis) {
+      kontrol();
+      const liste = cerceveler();
+      for (const c of liste) {
+        if (await deneC(c, ONAY_GORUNUR)) {
+          aktifCerceve = { cerceve: c, ifade: ONAY_GORUNUR };
+          return 'onay';
+        }
+      }
+      let girisVar = false;
+      for (const c of liste) {
+        if (await deneC(c, GIRIS_VAR)) { girisVar = true; break; }
+      }
+      if (!girisVar) { aktifCerceve = null; return 'gecti'; }
+      await uyu(300);
+    }
+    throw new Error('Giriş sonrası ekran gelmedi — hâlâ giriş sayfasındayız. '
+      + 'Kullanıcı adı veya şifre yanlış olabilir; kaydedilen HTML dosyasına bakın.');
+  };
+
+  let girisSonucu = null;
+
   try {
     await adim('giris-sayfasi', 'Giriş sayfası açılıyor', async () => {
+      aktifCerceve = null;
       await pencere.loadURL(ayarlar.girisUrl);
       await sakinlesme();
-      await bekle(`!!window.__rd.bul(${JSON.stringify(ALAN.kullanici)})`, 'kullanıcı adı kutusu');
+      await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kullanici)})`,
+        'kullanıcı adı kutusu', SAYFA_SURESI);
       return { url: pencere.webContents.getURL() };
     });
 
@@ -397,25 +480,12 @@ async function calistir(istek) {
       await js(`window.__rd.tikla(window.__rd.bul(${JSON.stringify(ALAN.giris)}))`);
       await uyu(1500);
       await sakinlesme(30000);
-      await bekle(
-        `(function () {
-           var o = window.__rd.bul(${JSON.stringify(ALAN.onayKodu)});
-           if (o && window.__rd.gorunur(o)) return 'onay';
-           if (!window.__rd.bul(${JSON.stringify(ALAN.giris)})) return 'gecti';
-           return null;
-         })()`,
-        'giriş sonrası ekran — hâlâ giriş sayfasındayız, kullanıcı adı veya şifre yanlış olabilir'
-        + ' (kaydedilen HTML dosyasına bakın)', 45000
-      );
-      return { url: pencere.webContents.getURL() };
+      aktifCerceve = null;
+      girisSonucu = await girisiBekle();
+      return { sonuc: girisSonucu, url: pencere.webContents.getURL() };
     });
 
-    const onayGerekli = await dene(
-      `(function () { var o = window.__rd.bul(${JSON.stringify(ALAN.onayKodu)});`
-      + ' return !!(o && window.__rd.gorunur(o)); })()'
-    );
-
-    if (onayGerekli) {
+    if (girisSonucu === 'onay') {
       await adim('onay-kodu', 'Onay kodu bekleniyor', async () => {
         let sonHata = null;
         for (let deneme = 1; deneme <= 2; deneme++) {
@@ -442,32 +512,38 @@ async function calistir(istek) {
     }
 
     await adim('ana-sayfa', 'Ana sayfaya gidiliyor', async () => {
+      aktifCerceve = null;
       const hedef = ayarlar.anaUrl || ayarlar.girisUrl;
       await pencere.loadURL(hedef);
       await sakinlesme();
-      return { url: pencere.webContents.getURL() };
+      return { url: pencere.webContents.getURL(), cerceve: cerceveler().length };
     });
 
     await adim('raporlar-menu', 'Raporlar menüsü açılıyor', async () => {
+      const menuVar = `!!window.__rd.xp(${JSON.stringify(ayarlar.menuXpath)})`;
+      await cerceveSec(menuVar,
+        'Raporlar menüsü bulunamadı — Ayarlar\'daki menü yolu (XPath) tutmuyor', 20000);
+
       const menu = await js(
         `(function () { var e = window.__rd.xp(${JSON.stringify(ayarlar.menuXpath)});`
         + ' if (!e) return null; window.__rd.tikla(e);'
         + ' var a = e.querySelector(":scope > a"); if (a) window.__rd.tikla(a);'
         + ' return (e.textContent || "").trim().slice(0, 60); })()'
       );
-      if (!menu) throw new Error('Raporlar menüsü bulunamadı (XPath tutmuyor).');
-      await uyu(700);
-      const alt = await js(
+      await uyu(900);
+
+      const alt = await bekle(
         `(function () { var e = window.__rd.xp(${JSON.stringify(ayarlar.altMenuXpath)});`
-        + ' if (!e) return null; window.__rd.tikla(e);'
-        + ' return (e.textContent || "").trim().slice(0, 60); })()'
+        + ' if (!e || !window.__rd.gorunur(e)) return null; window.__rd.tikla(e);'
+        + ' return (e.textContent || "").trim().slice(0, 60) || "tıklandı"; })()',
+        'Raporlar alt menüsü açılmadı — alt menü yolu (XPath) tutmuyor olabilir', 15000
       );
-      if (!alt) throw new Error('Raporlar alt menüsü bulunamadı (XPath tutmuyor).');
+
       await uyu(1500);
+      const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.rapor + '_Input')})`,
+        'rapor seçim kutusu — sayfa açılmadı ya da alan adı değişmiş', SAYFA_SURESI);
       await sakinlesme(30000);
-      await bekle(`!!window.__rd.bul(${JSON.stringify(ALAN.rapor + '_Input')})`,
-        'rapor seçim kutusu', SAYFA_SURESI);
-      return { menu, alt, url: pencere.webContents.getURL() };
+      return { menu, alt, url: c.url || pencere.webContents.getURL() };
     });
 
     await adim('rapor-secimi', `Rapor seçiliyor: ${ayarlar.raporAdi}`, async () => {
