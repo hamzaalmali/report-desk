@@ -450,6 +450,34 @@ async function main() {
       (await isle({ gonderen: '905388179495', metin: 'merhaba' })) === null);
   }
 
+  console.log('\nWhatsApp gönderen numarası');
+  {
+    const wa = require('../src/main/whatsapp/wa');
+    const kim = (key) => wa.gonderenNumara({ key }, '905388179495');
+
+    kontrol('özel sohbette numara doğrudan okunuyor',
+      (await kim({ remoteJid: '905551112233@s.whatsapp.net' })) === '905551112233');
+    kontrol('grupta katılımcıdan okunuyor, grup kimliğinden değil',
+      (await kim({ remoteJid: '120363@g.us', participant: '905551112233@s.whatsapp.net' }))
+      === '905551112233');
+    kontrol('grupta LID yerine telefon karşılığı seçiliyor',
+      (await kim({
+        remoteJid: '120363@g.us',
+        participant: '184736251@lid',
+        participantAlt: '905551112233@s.whatsapp.net',
+      })) === '905551112233');
+    kontrol('özel sohbette LID yerine telefon karşılığı seçiliyor',
+      (await kim({ remoteJid: '184736251@lid', remoteJidAlt: '905551112233@s.whatsapp.net' }))
+      === '905551112233');
+    kontrol('kendi telefonundan yazınca gönderen kendi numaramız',
+      (await kim({ remoteJid: '120363@g.us', fromMe: true })) === '905388179495');
+
+    const metin = (message) => wa.mesajMetni({ message });
+    kontrol('mesaj metni her biçimden okunuyor',
+      metin({ conversation: 'hava durumu' }) === 'hava durumu'
+      && metin({ extendedTextMessage: { text: 'hava durumu' } }) === 'hava durumu');
+  }
+
   console.log('\nUzaktan durdurma');
   {
     let icerik = '{"durum":"acik","mesaj":""}';

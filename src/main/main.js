@@ -268,7 +268,8 @@ app.whenReady().then(() => {
       (d) => {
         if (pencere && !pencere.isDestroyed()) pencere.webContents.send('waDurum', d);
       },
-      komut.olustur({ izinliler: () => izinliNumaralar(), log: kayit })
+      komut.olustur({ izinliler: () => izinliNumaralar(), log: kayit }),
+      kayit
     );
     if (wa.oturumVarMi()) wa.baslat().catch((e) => hataYaz('whatsapp başlangıç', e));
   } catch (e) {

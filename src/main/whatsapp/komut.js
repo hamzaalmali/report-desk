@@ -45,11 +45,14 @@ function olustur({ izinliler, log }) {
   const yaz = log || (() => { });
 
   return async function isle({ gonderen, metin }) {
-    const liste = numaralariCoz(izinliler());
-    if (!liste.includes(gonderen)) return null;
-
     const komut = komutBul(metin);
     if (!komut) return null;
+
+    const liste = numaralariCoz(izinliler());
+    if (!liste.includes(gonderen)) {
+      yaz(`WhatsApp komutu yok sayıldı (${komut.kod}): ${gonderen} izinli listede değil`);
+      return null;
+    }
 
     yaz(`WhatsApp komutu: ${gonderen} → ${komut.kod}`);
     try {

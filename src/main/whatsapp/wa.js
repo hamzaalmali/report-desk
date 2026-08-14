@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const QR = require('qrcode');
+const { komutBul } = require('./komut');
 
 const CIHAZ_ADI = 'ALMALI';
 
@@ -13,6 +14,7 @@ let oturumYolu = null;
 let dinleyici = () => { };
 let kapatiliyor = false;
 let komutIsleyici = null;
+let gunlukYaz = () => { };
 const sonKomut = new Map();
 let yenidenDeneme = 0;
 let zamanlayici = null;
@@ -39,10 +41,15 @@ function oturumVarMi() {
   }
 }
 
-function kur(klasor, olayFn, komutFn) {
+function gunluk(metin) {
+  try { gunlukYaz(metin); } catch { }
+}
+
+function kur(klasor, olayFn, komutFn, logFn) {
   oturumYolu = klasor;
   if (olayFn) dinleyici = olayFn;
   if (komutFn) komutIsleyici = komutFn;
+  if (logFn) gunlukYaz = logFn;
   fs.mkdirSync(oturumYolu, { recursive: true });
   bildir({ asama: oturumVarMi() ? 'kapali' : 'kapali' });
 }
@@ -131,6 +138,7 @@ async function baslat() {
 }
 
 const KOMUT_BEKLEME = 15000;
+const kendiYanitlarimiz = new Set();
 
 function mesajMetni(m) {
   const i = m.message || {};
@@ -145,24 +153,81 @@ function numaraCikar(jid) {
   return String(jid || '').split('@')[0].split(':')[0].replace(/\D/g, '');
 }
 
-async function gelenMesaj(m) {
-  if (!komutIsleyici || !m || !m.key || m.key.fromMe) return;
-  const metin = mesajMetni(m).trim();
-  if (!metin) return;
+function lidMi(jid) {
+  return String(jid || '').includes('@lid');
+}
 
+function kendiNumara() {
+  return numaraCikar((sock && sock.user && sock.user.id) || '');
+}
+
+async function lidNumarasi(jid) {
+  try {
+    const esleme = sock && sock.signalRepository && sock.signalRepository.lidMapping;
+    if (esleme && typeof esleme.getPNForLID === 'function') {
+      const pn = await esleme.getPNForLID(jid);
+      if (pn) return numaraCikar(pn);
+    }
+  } catch { }
+  return null;
+}
+
+async function gonderenNumara(m, kendi) {
+  const k = m.key;
+  if (k.fromMe) return kendi != null ? kendi : kendiNumara();
+
+  const grup = String(k.remoteJid || '').endsWith('@g.us');
+  const adaylar = grup
+    ? [k.participantAlt, k.participant]
+    : [k.remoteJidAlt, k.remoteJid, k.participantAlt, k.participant];
+
+  for (const a of adaylar) {
+    if (a && !lidMi(a)) return numaraCikar(a);
+  }
+  for (const a of adaylar) {
+    if (!a) continue;
+    const pn = await lidNumarasi(a);
+    if (pn) return pn;
+  }
+  return numaraCikar(adaylar.find(Boolean));
+}
+
+async function gelenMesaj(m) {
+  if (!komutIsleyici || !m || !m.key) return;
+  if (m.key.id && kendiYanitlarimiz.has(m.key.id)) return;
+
+  const metin = mesajMetni(m).trim();
   const sohbet = m.key.remoteJid;
-  const gonderen = numaraCikar(m.key.participant || sohbet);
-  if (!gonderen) return;
+  const gonderen = metin ? await gonderenNumara(m) : '';
+
+  const eslesme = metin ? komutBul(metin) : null;
+  gunluk(`WhatsApp mesaj: sohbet=${sohbet || '?'} biçim=${m.key.addressingMode || '?'}`
+    + ` katılımcı=${m.key.participant || '-'}/${m.key.participantAlt || '-'}`
+    + ` karşı=${m.key.remoteJidAlt || '-'} benden=${m.key.fromMe ? 'evet' : 'hayır'}`
+    + ` gönderen=${gonderen || '?'} uzunluk=${metin.length}`
+    + ` komut=${eslesme ? eslesme.kod : 'yok'}`);
+
+  if (!metin || !gonderen) return;
 
   const simdi = Date.now();
-  if (simdi - (sonKomut.get(gonderen) || 0) < KOMUT_BEKLEME) return;
+  if (simdi - (sonKomut.get(gonderen) || 0) < KOMUT_BEKLEME) {
+    gunluk(`WhatsApp mesaj atlandı: ${gonderen} için bekleme süresi dolmadı`);
+    return;
+  }
 
   const yanit = await komutIsleyici({ gonderen, metin, sohbet, grupMu: String(sohbet).endsWith('@g.us') });
   if (!yanit) return;
 
   sonKomut.set(gonderen, simdi);
   try {
-    await sock.sendMessage(sohbet, { text: yanit }, { quoted: m });
+    const g = await sock.sendMessage(sohbet, { text: yanit }, { quoted: m });
+    const kimlik = g && g.key && g.key.id;
+    if (kimlik) {
+      kendiYanitlarimiz.add(kimlik);
+      if (kendiYanitlarimiz.size > 50) {
+        kendiYanitlarimiz.delete(kendiYanitlarimiz.values().next().value);
+      }
+    }
   } catch { }
 }
 
@@ -259,4 +324,5 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
   gruplariGetir, belgeGonder, topluBelgeGonder,
+  gonderenNumara, mesajMetni,
 };
