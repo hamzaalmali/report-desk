@@ -72,6 +72,67 @@ const YARDIM = `
   rd.denetim = function (id) {
     try { return window.$find ? window.$find(id) : null; } catch (e) { return null; }
   };
+  rd.metin = function (e, uzunluk) {
+    if (!e) return '';
+    return (e.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, uzunluk || 60);
+  };
+  rd.menuKok = function () {
+    var kok = rd.bul('leftsidenav');
+    if (kok) return kok;
+    var uller = [].slice.call(document.querySelectorAll('ul'));
+    uller.sort(function (a, b) { return b.children.length - a.children.length; });
+    return uller[0] || null;
+  };
+  rd.baslikMetni = function (l) {
+    var p = '';
+    var c = (l && l.childNodes) || [];
+    for (var i = 0; i < c.length; i++) {
+      var n = c[i];
+      if (n.nodeType === 3) p += n.nodeValue || '';
+      else if (n.tagName && n.tagName !== 'UL') p += n.textContent || '';
+    }
+    return p.replace(/\\s+/g, ' ').trim().slice(0, 40);
+  };
+  rd.menuOgeleri = function () {
+    var kok = rd.menuKok();
+    if (!kok) return [];
+    return [].slice.call(kok.children).map(function (l, i) {
+      return (i + 1) + ') ' + rd.metin(l, 30);
+    });
+  };
+  rd.menuOge = function (yol) {
+    var e = rd.xp(yol);
+    if (e) return e;
+    var kok = rd.menuKok();
+    var liste = kok ? [].slice.call(kok.children) : [];
+    for (var i = 0; i < liste.length; i++) {
+      var l = liste[i];
+      if (l.tagName !== 'LI' || !l.querySelector('ul')) continue;
+      var b = rd.baslikMetni(l).replace(/i/g, 'İ').toUpperCase();
+      if (b.indexOf('RAPOR') === 0) return l;
+    }
+    return null;
+  };
+  rd.menuAc = function (yol) {
+    var e = rd.menuOge(yol);
+    if (!e) return null;
+    rd.tikla(e);
+    var a = e.querySelector(':scope > a');
+    if (a) rd.tikla(a);
+    return { metin: rd.metin(e), yol: rd.xp(yol) ? 'xpath' : 'metin' };
+  };
+  rd.altMenuAc = function (altYol, menuYol) {
+    var e = rd.xp(altYol);
+    var yol = 'xpath';
+    if (!e || !rd.gorunur(e)) {
+      var m = rd.menuOge(menuYol);
+      e = m ? m.querySelector('ul li a') : null;
+      yol = 'menuden';
+    }
+    if (!e || !rd.gorunur(e)) return null;
+    rd.tikla(e);
+    return { metin: rd.metin(e) || 'tıklandı', yol: yol };
+  };
   rd.etkin = function (e) {
     if (!e || e.disabled) return false;
     if (/rbDisabled|aspNetDisabled|rgDisabled/.test(e.className || '')) return false;
@@ -574,23 +635,33 @@ async function calistir(istek) {
       return { url: pencere.webContents.getURL(), cerceve: cerceveler().length };
     });
 
-    await adim('raporlar-menu', 'Raporlar menüsü açılıyor', async () => {
-      const menuVar = `!!window.__rd.xp(${JSON.stringify(ayarlar.menuXpath)})`;
-      await cerceveSec(menuVar,
-        'Raporlar menüsü bulunamadı — Ayarlar\'daki menü yolu (XPath) tutmuyor', 20000);
+    const menuOzeti = async () => {
+      for (const c of cerceveler()) {
+        const l = await deneC(c, 'window.__rd.menuOgeleri()');
+        if (l && l.length) return l.join(' · ');
+      }
+      return 'menü okunamadı';
+    };
 
-      const menu = await js(
-        `(function () { var e = window.__rd.xp(${JSON.stringify(ayarlar.menuXpath)});`
-        + ' if (!e) return null; window.__rd.tikla(e);'
-        + ' var a = e.querySelector(":scope > a"); if (a) window.__rd.tikla(a);'
-        + ' return (e.textContent || "").trim().slice(0, 60); })()'
-      );
+    await adim('raporlar-menu', 'Raporlar menüsü açılıyor', async () => {
+      try {
+        await cerceveSec(`!!window.__rd.menuOge(${JSON.stringify(ayarlar.menuXpath)})`,
+          'menü', 20000);
+      } catch {
+        throw new Error('Raporlar menüsü bulunamadı — Ayarlar\'daki menü yolu (XPath) '
+          + `tutmuyor. Menüdekiler: ${await menuOzeti()}`);
+      }
+
+      const menu = await js(`window.__rd.menuAc(${JSON.stringify(ayarlar.menuXpath)})`);
+      if (menu && menu.yol === 'metin') {
+        log('Portal: menü yolu tutmadı, "Rapor" ile başlayan menü kullanıldı — '
+          + 'Ayarlar\'daki menü yolunu güncelleyin.');
+      }
       await uyu(900);
 
       const alt = await bekle(
-        `(function () { var e = window.__rd.xp(${JSON.stringify(ayarlar.altMenuXpath)});`
-        + ' if (!e || !window.__rd.gorunur(e)) return null; window.__rd.tikla(e);'
-        + ' return (e.textContent || "").trim().slice(0, 60) || "tıklandı"; })()',
+        `window.__rd.altMenuAc(${JSON.stringify(ayarlar.altMenuXpath)},`
+        + ` ${JSON.stringify(ayarlar.menuXpath)})`,
         'Raporlar alt menüsü açılmadı — alt menü yolu (XPath) tutmuyor olabilir', 15000
       );
 

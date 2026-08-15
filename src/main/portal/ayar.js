@@ -11,13 +11,13 @@ const ALANLAR = [
     anahtar: 'portalMenuXpath',
     ad: 'menuXpath',
     tur: 'metin',
-    varsayilan: '/html/body/form/div[3]/div/div/div[1]/ul/li[7]',
+    varsayilan: '//*[@id="leftsidenav"]/li[6]',
   },
   {
     anahtar: 'portalAltMenuXpath',
     ad: 'altMenuXpath',
     tur: 'metin',
-    varsayilan: '/html/body/form/div[3]/div/div/div[1]/ul/li[7]/ul/li[1]/a',
+    varsayilan: '//*[@id="leftsidenav"]/li[6]/ul/li[1]/a',
   },
   { anahtar: 'portalGunGeri', ad: 'gunGeri', tur: 'sayi', varsayilan: 1 },
   { anahtar: 'portalYenilemeSn', ad: 'yenilemeSn', tur: 'sayi', varsayilan: 120, enAz: 5 },
@@ -28,8 +28,14 @@ const ALANLAR = [
 ];
 
 const ESKIYEN = {
-  menuXpath: ['//*[@id="leftsidenav"]/li[7]'],
-  altMenuXpath: ['//*[@id="leftsidenav"]/li[7]/ul/li[1]/a'],
+  menuXpath: [
+    '//*[@id="leftsidenav"]/li[7]',
+    '/html/body/form/div[3]/div/div/div[1]/ul/li[7]',
+  ],
+  altMenuXpath: [
+    '//*[@id="leftsidenav"]/li[7]/ul/li[1]/a',
+    '/html/body/form/div[3]/div/div/div[1]/ul/li[7]/ul/li[1]/a',
+  ],
 };
 
 function coz(tur, deger, varsayilan, enAz) {

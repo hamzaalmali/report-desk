@@ -54,37 +54,91 @@ async function genisTabloBul() {
   return null;
 }
 
-function sahteSayfa(yardimKodu, tanimlar = []) {
+function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
   const sayfa = { tiklananlar: [] };
 
   const oge = (t) => {
+    const kendiYazi = t.yazi || '';
     const e = {
-      id: t.id,
-      tagName: 'INPUT',
+      id: t.id || '',
+      tagName: t.etiket || 'INPUT',
       className: t.sinif || '',
       disabled: !!t.kapali,
+      children: [],
+      get textContent() {
+        return [kendiYazi, ...e.children.map((c) => c.textContent)].join(' ').trim();
+      },
+      get childNodes() {
+        return [{ nodeType: 3, nodeValue: kendiYazi }, ...e.children];
+      },
+      get firstElementChild() { return e.children[0] || null; },
       getBoundingClientRect: () => (t.gizli ? { width: 0, height: 0 } : { width: 90, height: 22 }),
       scrollIntoView() { },
       focus() { },
       dispatchEvent() { return true; },
-      click() { sayfa.tiklananlar.push(e.id); },
+      click() { sayfa.tiklananlar.push(e.id || e.textContent); },
       closest: (secici) => (secici === 'tr' ? { innerText: t.satir || '' } : null),
+      querySelector: (secici) => ara(e, secici)[0] || null,
+      querySelectorAll: (secici) => ara(e, secici),
     };
     return e;
   };
 
-  const ogeler = tanimlar.map(oge);
-
-  const eslesir = (e, secici) => (secici.match(/id\*="([^"]+)"/g) || [])
-    .map((p) => p.slice(5, -1))
-    .every((p) => String(e.id).includes(p));
-
-  const belge = {
-    getElementById: (id) => ogeler.find((e) => e.id === id) || null,
-    querySelectorAll: (secici) => ogeler.filter((e) => eslesir(e, secici)),
-    querySelector: (secici) => ogeler.find((e) => eslesir(e, secici)) || null,
+  const eslesir = (e, secici) => {
+    const etiket = (secici.match(/^[a-z]+/) || [])[0];
+    if (etiket && e.tagName !== etiket.toUpperCase()) return false;
+    return (secici.match(/id\*="([^"]+)"/g) || [])
+      .map((p) => p.slice(5, -1))
+      .every((p) => String(e.id).includes(p));
   };
 
+  const ara = (kok, secici) => {
+    const son = secici.split(/[\s>]+/).filter(Boolean).pop();
+    const bulunan = [];
+    if (secici.trim().startsWith(':scope >')) {
+      return kok.children.filter((c) => eslesir(c, son));
+    }
+    const gez = (e) => {
+      for (const c of e.children) { if (eslesir(c, son)) bulunan.push(c); gez(c); }
+    };
+    gez(kok);
+    return bulunan;
+  };
+
+  const ogeler = tanimlar.map(oge);
+  const kokler = [...ogeler];
+
+  if (menu) {
+    const liste = oge({ id: menu.id || 'leftsidenav', etiket: 'UL' });
+    for (const m of menu.ogeler) {
+      const li = oge({ etiket: 'LI', yazi: m.yazi });
+      if (m.alt) {
+        const alt = oge({ etiket: 'UL' });
+        const altLi = oge({ etiket: 'LI' });
+        altLi.children.push(oge({ etiket: 'A', yazi: m.alt }));
+        alt.children.push(altLi);
+        li.children.push(alt);
+      }
+      liste.children.push(li);
+    }
+    kokler.push(liste);
+  }
+
+  const tumu = () => {
+    const hepsi = [];
+    const gez = (e) => { hepsi.push(e); e.children.forEach(gez); };
+    kokler.forEach(gez);
+    return hepsi;
+  };
+
+  const belge = {
+    getElementById: (id) => tumu().find((e) => e.id === id) || null,
+    querySelectorAll: (secici) => tumu().filter((e) => eslesir(e, secici)),
+    querySelector: (secici) => tumu().find((e) => eslesir(e, secici)) || null,
+    evaluate: (yol) => ({ singleNodeValue: sayfa.yollar[yol] || null }),
+  };
+
+  sayfa.yollar = {};
   const pencere = {};
   require('node:vm').runInNewContext(yardimKodu, {
     window: pencere,
@@ -94,6 +148,7 @@ function sahteSayfa(yardimKodu, tanimlar = []) {
 
   sayfa.pencere = pencere;
   sayfa.belge = belge;
+  sayfa.kok = kokler[kokler.length - 1];
   sayfa.rd = pencere.__rd;
   return sayfa;
 }
@@ -552,14 +607,23 @@ async function main() {
     kontrol('ana sayfa adresi giriş adresinden türetiliyor',
       y.anaUrl === 'https://ornek.test/default.aspx', y.anaUrl);
     kontrol('kaydedilmemiş ayar bozulmuyor',
-      portalAyar.oku(db).altMenuXpath.endsWith('/ul/li[7]/ul/li[1]/a'),
+      portalAyar.oku(db).altMenuXpath.endsWith('/li[6]/ul/li[1]/a'),
       portalAyar.oku(db).altMenuXpath);
     kontrol('ayarlar eksiksizken uyarı yok', portalAyar.dogrula(y).length === 0);
 
-    db.ortakAyarYaz('portalMenuXpath', portalAyar.ESKIYEN.menuXpath[0]);
-    kontrol('eskiyen menü yolu yeni varsayılana dönüyor',
-      portalAyar.oku(db).menuXpath === '/html/body/form/div[3]/div/div/div[1]/ul/li[7]',
-      portalAyar.oku(db).menuXpath);
+    for (const eski of portalAyar.ESKIYEN.menuXpath) {
+      db.ortakAyarYaz('portalMenuXpath', eski);
+      kontrol(`eskiyen menü yolu yeni varsayılana dönüyor (${eski.slice(0, 22)}…)`,
+        portalAyar.oku(db).menuXpath === '//*[@id="leftsidenav"]/li[6]',
+        portalAyar.oku(db).menuXpath);
+    }
+    for (const eski of portalAyar.ESKIYEN.altMenuXpath) {
+      db.ortakAyarYaz('portalAltMenuXpath', eski);
+      kontrol(`eskiyen alt menü yolu yeni varsayılana dönüyor (${eski.slice(0, 22)}…)`,
+        portalAyar.oku(db).altMenuXpath === '//*[@id="leftsidenav"]/li[6]/ul/li[1]/a',
+        portalAyar.oku(db).altMenuXpath);
+    }
+    db.ortakAyarYaz('portalAltMenuXpath', '');
     db.ortakAyarYaz('portalMenuXpath', '//özel/yol');
     kontrol('kullanıcının yazdığı menü yolu korunuyor',
       portalAyar.oku(db).menuXpath === '//özel/yol');
@@ -714,6 +778,51 @@ async function main() {
     kontrol('olmayan düğme sessizce başarısız oluyor', sayfa.rd.dugme('yokBoyleBirSey') === null);
     kontrol('sayfa kodu tarayıcıyı kilitleyen kutuları devre dışı bırakıyor',
       sayfa.pencere.confirm() === true && sayfa.pencere.alert() === undefined);
+  }
+
+  console.log('\nPortal menüsü (sayfa içi kod)');
+  {
+    const portal = require('../src/main/portal/portal');
+    const YOL = '//*[@id="leftsidenav"]/li[6]';
+    const ALT_YOL = `${YOL}/ul/li[1]/a`;
+    const MENU = {
+      ogeler: [
+        { yazi: 'Ana Sayfa' }, { yazi: 'Abone' }, { yazi: 'Sayaç' },
+        { yazi: 'Arıza' }, { yazi: 'Tanımlar' },
+        { yazi: 'RAPORLAR', alt: 'Raporlar' },
+      ],
+    };
+
+    let sayfa = sahteSayfa(portal.YARDIM, [], MENU);
+    const menuLi = sayfa.kok.children[5];
+    sayfa.yollar[YOL] = menuLi;
+    sayfa.yollar[ALT_YOL] = menuLi.querySelector('ul li a');
+
+    let m = sayfa.rd.menuAc(YOL);
+    kontrol('menü ayardaki XPath ile açılıyor',
+      m.yol === 'xpath' && /RAPORLAR/.test(m.metin), JSON.stringify(m));
+    let a = sayfa.rd.altMenuAc(ALT_YOL, YOL);
+    kontrol('alt menü ayardaki XPath ile tıklanıyor',
+      a.yol === 'xpath' && a.metin === 'Raporlar', JSON.stringify(a));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], MENU);
+    m = sayfa.rd.menuAc(YOL);
+    kontrol('menü yolu tutmazsa "Rapor" ile başlayan menü bulunuyor',
+      m && m.yol === 'metin' && /RAPORLAR/.test(m.metin), JSON.stringify(m));
+    a = sayfa.rd.altMenuAc(ALT_YOL, YOL);
+    kontrol('alt menü yolu tutmazsa menünün ilk bağlantısına düşülüyor',
+      a && a.yol === 'menuden' && a.metin === 'Raporlar', JSON.stringify(a));
+    kontrol('menüde tıklananlar doğru sırayla',
+      sayfa.tiklananlar.join(' | ') === 'RAPORLAR Raporlar | Raporlar',
+      sayfa.tiklananlar.join(' | '));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], {
+      ogeler: [{ yazi: 'Abone' }, { yazi: 'Tanımlar', alt: 'Kullanıcılar' }],
+    });
+    kontrol('rapor menüsü hiç yoksa uydurmuyor', sayfa.rd.menuAc(YOL) === null);
+    kontrol('menüdekiler hata iletisi için listeleniyor',
+      sayfa.rd.menuOgeleri().join(' · ') === '1) Abone · 2) Tanımlar Kullanıcılar',
+      sayfa.rd.menuOgeleri().join(' · '));
   }
 
   console.log('\nWhatsApp gönderen numarası');

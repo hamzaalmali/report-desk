@@ -41,15 +41,15 @@ const ONAY = SAYFA('Onay Kodu', `
     <input id="btnOnay" type="submit" value="Onayla" />
   </form>`);
 
-const MENU_XPATH = '/html/body/form/div[3]/div/div/div[1]/ul/li[7]';
+const MENU_XPATH = '//*[@id="leftsidenav"]/li[6]';
 
 const ANA = SAYFA('Ana Sayfa', `
   <form>
     <div>üst şerit</div>
     <div>ikinci şerit</div>
     <div><div><div><div>
-      <ul>
-        ${[1, 2, 3, 4, 5, 6].map((n) => `<li class="sub1"><a href="javascript:void(0)"
+      <ul id="leftsidenav">
+        ${[1, 2, 3, 4, 5].map((n) => `<li class="sub1"><a href="javascript:void(0)"
           >Menü ${n}</a></li>`).join('')}
         <li class="sub1 t-indent" onclick="this.querySelector('ul').style.display='block'"
           >RAPORLAR<ul id="altmenu" style="display:none">
@@ -296,6 +296,11 @@ app.whenReady().then(async () => {
     kontrol('rapor ekranı iframe içinde bulundu',
       !!menuAdimi && menuAdimi.iz.cerceve >= 2 && /Rapor\.aspx$/.test(menuAdimi.sonuc.url || ''),
       menuAdimi && `${menuAdimi.iz.cerceve} çerçeve, ${menuAdimi.sonuc.url}`);
+    kontrol('menü ve alt menü ayardaki XPath ile bulundu',
+      !!menuAdimi && menuAdimi.sonuc.menu.yol === 'xpath'
+      && menuAdimi.sonuc.alt.yol === 'xpath'
+      && /RAPORLAR/.test(menuAdimi.sonuc.menu.metin || ''),
+      menuAdimi && JSON.stringify({ m: menuAdimi.sonuc.menu, a: menuAdimi.sonuc.alt }));
     kontrol('özet dosyası yazıldı', dosyalar.includes('ozet.json'));
 
     const girisHtml = fs.readFileSync(
