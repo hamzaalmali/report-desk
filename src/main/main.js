@@ -494,7 +494,7 @@ function hesabiHazirla(numara) {
   return { numara: kayit.numara, ad: kayit.ad, kullanici: kayit.kullanici, sifre };
 }
 
-async function portaliCalistir({ numara, onayKodu, ilerleme }) {
+async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme }) {
   const ayarlar = portalAyarlari();
   const eksik = portalAyar.dogrula(ayarlar);
   if (eksik.length) throw new Error(`Portal ayarları eksik: ${eksik.join(', ')}.`);
@@ -505,6 +505,7 @@ async function portaliCalistir({ numara, onayKodu, ilerleme }) {
     ayarlar,
     kokKlasor: PORTAL_KLASORU(),
     onayKodu,
+    dosyaHazir,
     log: kayit,
     ilerleme: (o) => {
       portalIlerlemeYolla(o);
@@ -539,36 +540,50 @@ async function waRaporKomutu(b) {
   const ayarlar = portalAyarlari();
   const haber = (metin) => { b.gonder(metin).catch(() => { }); };
 
-  const sonuc = await portaliCalistir({
-    numara: b.gonderen,
-    onayKodu: async (deneme, sonHata) => {
-      const soru = (sonHata ? `${sonHata}\n\n` : '')
-        + 'Size gelen onay kodunu yazıp gönderin.'
-        + (deneme > 1 ? ` (${deneme}. deneme)` : '');
-      return b.sor(soru, (ayarlar.onaySn || 180) * 1000);
-    },
-    ilerleme: (o) => {
-      if (o.kod === 'rapor-kaydet' && o.durum === 'bitti') {
-        haber(`Rapor kuyruğa alındı. Hazırlanması bekleniyor — her ${ayarlar.yenilemeSn} `
-          + `saniyede bir bakılacak (en fazla ${ayarlar.beklemeDk} dakika).`);
-      }
-    },
+  const aralikMetni = (s) => `Tarih: ${s.bas} – ${s.son} (${s.saat})`;
+  const aralik = portal.tarihAraligi(ayarlar.gunGeri);
+  const baslik = aralikMetni({
+    bas: aralik.bas.metin, son: aralik.son.metin, saat: ayarlar.saat,
   });
+  let sonuc = null;
+  try {
+    sonuc = await portaliCalistir({
+      numara: b.gonderen,
+      onayKodu: async (deneme, sonHata) => {
+        const soru = (sonHata ? `${sonHata}\n\n` : '')
+          + 'Size gelen onay kodunu yazıp gönderin.'
+          + (deneme > 1 ? ` (${deneme}. deneme)` : '');
+        return b.sor(soru, (ayarlar.onaySn || 180) * 1000);
+      },
+      dosyaHazir: async (d) => {
+        try {
+          await wa.belgeGonder(b.sohbet, d.dosya, d.ad, baslik);
+          return { ok: true };
+        } catch (e) {
+          kayit(`Rapor dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
+          return { ok: false, hata: e.message };
+        }
+      },
+      ilerleme: (o) => {
+        if (o.kod === 'rapor-kaydet' && o.durum === 'bitti') {
+          haber(`Rapor kuyruğa alındı. Hazırlanması bekleniyor — her ${ayarlar.yenilemeSn} `
+            + `saniyede bir bakılacak (en fazla ${ayarlar.beklemeDk} dakika).`);
+        }
+      },
+    });
+  } finally {
+    wa.soruDusur(b.gonderen);
+  }
 
   db.logYaz(null, 'portal', `WhatsApp isteği (${b.gonderen}) → ${sonuc.dosyaAdi || 'dosya yok'}`);
 
-  const bilgi = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})`;
-  if (sonuc.dosya) {
-    try {
-      await wa.belgeGonder(b.sohbet, sonuc.dosya, sonuc.dosyaAdi, bilgi);
-      return null;
-    } catch (e) {
-      kayit(`Rapor dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
-      return `Rapor indirildi ama dosya gönderilemedi: ${e.message}\n\n`
-        + `Dosya: ${sonuc.dosyaAdi || '-'}\n${bilgi}\nKlasör: ${sonuc.klasor}`;
-    }
+  const bilgi = aralikMetni(sonuc.aralik);
+  if (!sonuc.dosya) return `Rapor indirilemedi — dosya oluşmadı.\n${bilgi}\nKlasör: ${sonuc.klasor}`;
+  if (sonuc.gonderim && sonuc.gonderim.ok === false) {
+    return `Rapor indirildi ama dosya gönderilemedi: ${sonuc.gonderim.hata}\n\n`
+      + `Dosya: ${sonuc.dosyaAdi || '-'}\n${bilgi}\nKlasör: ${sonuc.klasor}`;
   }
-  return `Rapor indirilemedi — dosya oluşmadı.\n${bilgi}\nKlasör: ${sonuc.klasor}`;
+  return null;
 }
 
 const KILITSIZ = new Set([

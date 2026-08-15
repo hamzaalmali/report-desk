@@ -164,6 +164,12 @@ function soruyuDusur(numara, hata) {
   b.red(hata);
 }
 
+function soruDusur(numara) {
+  const vardi = bekleyenSorular.has(numara);
+  soruyuDusur(numara, new Error('Bekleyen soru iptal edildi.'));
+  return vardi;
+}
+
 async function sor(sohbet, numara, metin, sureMs = 180000) {
   soruyuDusur(numara, new Error('Yeni bir soru sorulunca bu soru düştü.'));
   await gonder(sohbet, metin);
@@ -261,17 +267,21 @@ async function gelenMesaj(m) {
   }
 
   sonKomut.set(gonderen, simdi);
-  const yanit = await komutIsleyici({
-    gonderen,
-    metin,
-    sohbet,
-    grupMu: String(sohbet).endsWith('@g.us'),
-    gonder: (t) => gonder(sohbet, t),
-    sor: (t, sure) => sor(sohbet, gonderen, t, sure),
-  });
-  if (!yanit) { sonKomut.delete(gonderen); return; }
+  let yanit = null;
+  try {
+    yanit = await komutIsleyici({
+      gonderen,
+      metin,
+      sohbet,
+      grupMu: String(sohbet).endsWith('@g.us'),
+      gonder: (t) => gonder(sohbet, t),
+      sor: (t, sure) => sor(sohbet, gonderen, t, sure),
+    });
+  } finally {
+    sonKomut.delete(gonderen);
+  }
+  if (!yanit) return;
 
-  sonKomut.set(gonderen, Date.now());
   try {
     yanitiIsaretle(await sock.sendMessage(sohbet, { text: yanit }, { quoted: m }));
   } catch { }
@@ -384,5 +394,5 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
   gruplariGetir, belgeGonder, topluBelgeGonder, dosyaTuru,
-  gonderenNumara, mesajMetni, gonder, sor,
+  gonderenNumara, mesajMetni, gonder, sor, soruDusur,
 };

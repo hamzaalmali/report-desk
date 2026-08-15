@@ -19,6 +19,7 @@ const ALAN = {
   kaydet: 'ctl00_ContentPlaceHolder1_btnRaporKaydet_input',
   yenile: 'ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input',
   indir: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input',
+  sil: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporSil_input',
 };
 
 const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
@@ -100,38 +101,61 @@ const YARDIM = `
       return (i + 1) + ') ' + rd.metin(l, 30);
     });
   };
-  rd.menuOge = function (yol) {
-    var e = rd.xp(yol);
-    if (e) return e;
-    var kok = rd.menuKok();
-    var liste = kok ? [].slice.call(kok.children) : [];
-    for (var i = 0; i < liste.length; i++) {
-      var l = liste[i];
-      if (l.tagName !== 'LI' || !l.querySelector('ul')) continue;
-      var b = rd.baslikMetni(l).replace(/i/g, 'İ').toUpperCase();
-      if (b.indexOf('RAPOR') === 0) return l;
+  rd.buyuk = function (m) {
+    return String(m || '').replace(/i/g, 'İ').toUpperCase();
+  };
+  rd.menuAdaylari = function () {
+    var hepsi = [].slice.call(document.querySelectorAll('li'));
+    var uygun = [];
+    for (var i = 0; i < hepsi.length; i++) {
+      var l = hepsi[i];
+      if (!l.querySelector || !l.querySelector('ul')) continue;
+      var b = rd.buyuk(rd.baslikMetni(l));
+      if (b.indexOf('RAPOR') !== 0) continue;
+      uygun.push({ oge: l, tam: b === 'RAPORLAR' });
     }
-    return null;
+    return uygun;
+  };
+  rd.menuSec = function (yol) {
+    var a = rd.menuAdaylari();
+    for (var i = 0; i < a.length; i++) if (a[i].tam) return { oge: a[i].oge, yol: 'metin' };
+    if (a.length) return { oge: a[0].oge, yol: 'metin' };
+    var x = rd.xp(yol);
+    return x ? { oge: x, yol: 'xpath' } : null;
+  };
+  rd.menuOge = function (yol) {
+    var s = rd.menuSec(yol);
+    return s ? s.oge : null;
   };
   rd.menuAc = function (yol) {
-    var e = rd.menuOge(yol);
-    if (!e) return null;
-    rd.tikla(e);
-    var a = e.querySelector(':scope > a');
+    var s = rd.menuSec(yol);
+    if (!s) return null;
+    rd.tikla(s.oge);
+    var a = s.oge.querySelector(':scope > a');
     if (a) rd.tikla(a);
-    return { metin: rd.metin(e), yol: rd.xp(yol) ? 'xpath' : 'metin' };
+    return { metin: rd.baslikMetni(s.oge) || rd.metin(s.oge), yol: s.yol };
   };
   rd.altMenuAc = function (altYol, menuYol) {
-    var e = rd.xp(altYol);
-    var yol = 'xpath';
-    if (!e || !rd.gorunur(e)) {
-      var m = rd.menuOge(menuYol);
-      e = m ? m.querySelector('ul li a') : null;
-      yol = 'menuden';
+    var m = rd.menuOge(menuYol);
+    var baglar = m ? [].slice.call(m.querySelectorAll('ul a')).filter(function (b) {
+      return rd.gorunur(b);
+    }) : [];
+    for (var i = 0; i < baglar.length; i++) {
+      if (rd.buyuk(rd.metin(baglar[i], 40)) === 'RAPORLAR') {
+        rd.tikla(baglar[i]);
+        return { metin: rd.metin(baglar[i], 40), yol: 'metin' };
+      }
     }
-    if (!e || !rd.gorunur(e)) return null;
-    rd.tikla(e);
-    return { metin: rd.metin(e) || 'tıklandı', yol: yol };
+    var x = rd.xp(altYol);
+    if (x && rd.gorunur(x)) {
+      rd.tikla(x);
+      return { metin: rd.metin(x, 40) || 'tıklandı', yol: 'xpath' };
+    }
+    if (baglar.length) {
+      rd.tikla(baglar[0]);
+      return { metin: rd.metin(baglar[0], 40) || 'tıklandı', yol: 'ilk' };
+    }
+    return null;
   };
   rd.etkin = function (e) {
     if (!e || e.disabled) return false;
@@ -338,6 +362,7 @@ async function calistir(istek) {
   const {
     hesap, ayarlar, kokKlasor,
     onayKodu = async () => { throw new Error('Onay kodu sorulamadı.'); },
+    dosyaHazir = null,
     ilerleme = () => { },
     log = () => { },
   } = istek;
@@ -355,6 +380,7 @@ async function calistir(istek) {
   const gizliler = [hesap.sifre, hesap.kullanici];
   const adimlar = [];
   let sira = 0;
+  let hataOldu = false;
 
   calisan = {
     kim: hesap.numara,
@@ -648,14 +674,15 @@ async function calistir(istek) {
         await cerceveSec(`!!window.__rd.menuOge(${JSON.stringify(ayarlar.menuXpath)})`,
           'menü', 20000);
       } catch {
-        throw new Error('Raporlar menüsü bulunamadı — Ayarlar\'daki menü yolu (XPath) '
-          + `tutmuyor. Menüdekiler: ${await menuOzeti()}`);
+        throw new Error('Raporlar menüsü bulunamadı — menüde adı "Rapor" ile başlayan '
+          + 'bir başlık yok ve Ayarlar\'daki menü yolu da tutmuyor. '
+          + `Menüdekiler: ${await menuOzeti()}`);
       }
 
       const menu = await js(`window.__rd.menuAc(${JSON.stringify(ayarlar.menuXpath)})`);
-      if (menu && menu.yol === 'metin') {
-        log('Portal: menü yolu tutmadı, "Rapor" ile başlayan menü kullanıldı — '
-          + 'Ayarlar\'daki menü yolunu güncelleyin.');
+      if (menu && menu.yol === 'xpath') {
+        log('Portal: menüde "Rapor" ile başlayan başlık bulunamadı, '
+          + 'Ayarlar\'daki menü yolu kullanıldı.');
       }
       await uyu(900);
 
@@ -807,6 +834,30 @@ async function calistir(istek) {
       return Promise.race([indirme.sozu, zamanAsimi]);
     });
 
+    let gonderim = null;
+    if (typeof dosyaHazir === 'function' && sonuc && sonuc.dosya) {
+      gonderim = await adim('gonderim', 'Rapor gönderiliyor', async () => dosyaHazir(sonuc));
+    }
+
+    let silme = null;
+    if (sonuc && sonuc.dosya && (!gonderim || gonderim.ok !== false)) {
+      silme = await adim('kuyruk-sil', 'Rapor kuyruktan siliniyor', async () => {
+        const hedef = kuyruk && kuyruk.id
+          ? String(kuyruk.id).replace('btnRaporIndir', 'btnRaporSil')
+          : ALAN.sil;
+        const yontem = await dene(`window.__rd.dugme(${JSON.stringify(hedef)})`);
+        if (!yontem || yontem === 'pasif') {
+          log(`Portal: kuyruk satırı silinemedi (${yontem || 'düğme yok'}).`);
+          return { silindi: false, yontem: yontem || null };
+        }
+        await uyu(1200);
+        await sakinlesme(30000);
+        const kaldiMi = await dene(`!!window.__rd.bul(${JSON.stringify(hedef)})`);
+        if (kaldiMi) log('Portal: silme düğmesine basıldı ama satır kuyrukta duruyor.');
+        return { silindi: !kaldiMi, yontem };
+      });
+    }
+
     const ozet = {
       klasor,
       dosya: sonuc ? sonuc.dosya : null,
@@ -816,12 +867,15 @@ async function calistir(istek) {
       kuyruk: kuyruk
         ? { yenileme: kuyruk.yenileme, satir: kuyruk.satir, hemenHazir: !!kuyruk.hemenHazir }
         : null,
+      gonderim,
+      silme,
       aralik: { bas: aralik.bas.metin, son: aralik.son.metin, saat: ayarlar.saat },
     };
     fs.writeFileSync(path.join(klasor, 'ozet.json'), JSON.stringify(ozet, null, 2), 'utf8');
     log(`Portal işlemi tamam: ${ozet.dosyaAdi || 'dosya yok'} → ${klasor}`);
     return ozet;
   } catch (e) {
+    hataOldu = true;
     try {
       fs.writeFileSync(path.join(klasor, 'ozet.json'),
         JSON.stringify({ klasor, hata: e.message, adimlar }, null, 2), 'utf8');
@@ -831,7 +885,7 @@ async function calistir(istek) {
   } finally {
     indirme.birak();
     calisan = null;
-    if (ayarlar.kapat) {
+    if (ayarlar.kapat || hataOldu) {
       try { if (!pencere.isDestroyed()) pencere.destroy(); } catch { }
     }
   }

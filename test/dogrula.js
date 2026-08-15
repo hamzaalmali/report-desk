@@ -112,11 +112,13 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
     const liste = oge({ id: menu.id || 'leftsidenav', etiket: 'UL' });
     for (const m of menu.ogeler) {
       const li = oge({ etiket: 'LI', yazi: m.yazi });
-      if (m.alt) {
+      if (m.altlar) {
         const alt = oge({ etiket: 'UL' });
-        const altLi = oge({ etiket: 'LI' });
-        altLi.children.push(oge({ etiket: 'A', yazi: m.alt }));
-        alt.children.push(altLi);
+        for (const ad of m.altlar) {
+          const altLi = oge({ etiket: 'LI' });
+          altLi.children.push(oge({ etiket: 'A', yazi: ad }));
+          alt.children.push(altLi);
+        }
         li.children.push(alt);
       }
       liste.children.push(li);
@@ -785,44 +787,56 @@ async function main() {
     const portal = require('../src/main/portal/portal');
     const YOL = '//*[@id="leftsidenav"]/li[6]';
     const ALT_YOL = `${YOL}/ul/li[1]/a`;
-    const MENU = {
-      ogeler: [
-        { yazi: 'Ana Sayfa' }, { yazi: 'Abone' }, { yazi: 'Sayaç' },
-        { yazi: 'Arıza' }, { yazi: 'Tanımlar' },
-        { yazi: 'RAPORLAR', alt: 'Raporlar' },
-      ],
-    };
+    const MENU = (yerler) => ({
+      ogeler: yerler.map((y) => (y === 'RAPORLAR'
+        ? { yazi: 'RAPORLAR', altlar: ['Rapor Kuyruğu', 'Raporlar'] }
+        : { yazi: y })),
+    });
+    const ALTI = ['Ana Sayfa', 'Abone', 'Sayaç', 'Arıza', 'Tanımlar', 'RAPORLAR'];
 
-    let sayfa = sahteSayfa(portal.YARDIM, [], MENU);
-    const menuLi = sayfa.kok.children[5];
-    sayfa.yollar[YOL] = menuLi;
-    sayfa.yollar[ALT_YOL] = menuLi.querySelector('ul li a');
-
+    let sayfa = sahteSayfa(portal.YARDIM, [], MENU(ALTI));
     let m = sayfa.rd.menuAc(YOL);
-    kontrol('menü ayardaki XPath ile açılıyor',
-      m.yol === 'xpath' && /RAPORLAR/.test(m.metin), JSON.stringify(m));
+    kontrol('menü adına göre bulunuyor',
+      m.yol === 'metin' && m.metin === 'RAPORLAR', JSON.stringify(m));
     let a = sayfa.rd.altMenuAc(ALT_YOL, YOL);
-    kontrol('alt menü ayardaki XPath ile tıklanıyor',
-      a.yol === 'xpath' && a.metin === 'Raporlar', JSON.stringify(a));
-
-    sayfa = sahteSayfa(portal.YARDIM, [], MENU);
-    m = sayfa.rd.menuAc(YOL);
-    kontrol('menü yolu tutmazsa "Rapor" ile başlayan menü bulunuyor',
-      m && m.yol === 'metin' && /RAPORLAR/.test(m.metin), JSON.stringify(m));
-    a = sayfa.rd.altMenuAc(ALT_YOL, YOL);
-    kontrol('alt menü yolu tutmazsa menünün ilk bağlantısına düşülüyor',
-      a && a.yol === 'menuden' && a.metin === 'Raporlar', JSON.stringify(a));
-    kontrol('menüde tıklananlar doğru sırayla',
-      sayfa.tiklananlar.join(' | ') === 'RAPORLAR Raporlar | Raporlar',
+    kontrol('alt menüde ilk bağlantı değil, adı Raporlar olan seçiliyor',
+      a.yol === 'metin' && a.metin === 'Raporlar', JSON.stringify(a));
+    kontrol('önce menüye sonra alt menüye tıklanıyor',
+      sayfa.tiklananlar.join(' | ') === 'RAPORLAR Rapor Kuyruğu Raporlar | Raporlar',
       sayfa.tiklananlar.join(' | '));
 
+    sayfa = sahteSayfa(portal.YARDIM, [], MENU(['Abone', 'RAPORLAR', 'Tanımlar']));
+    m = sayfa.rd.menuAc(YOL);
+    kontrol('menü sırası değişince de doğru menü bulunuyor',
+      m.yol === 'metin' && m.metin === 'RAPORLAR', JSON.stringify(m));
+
     sayfa = sahteSayfa(portal.YARDIM, [], {
-      ogeler: [{ yazi: 'Abone' }, { yazi: 'Tanımlar', alt: 'Kullanıcılar' }],
+      ogeler: [{ yazi: 'Abone' }, { yazi: 'Tanımlar', altlar: ['Kullanıcılar'] }],
     });
-    kontrol('rapor menüsü hiç yoksa uydurmuyor', sayfa.rd.menuAc(YOL) === null);
+    const digerLi = sayfa.kok.children[1];
+    sayfa.yollar[YOL] = digerLi;
+    m = sayfa.rd.menuAc(YOL);
+    kontrol('rapor menüsü yoksa ayardaki yola düşülüyor',
+      m && m.yol === 'xpath' && m.metin === 'Tanımlar', JSON.stringify(m));
+    a = sayfa.rd.altMenuAc(ALT_YOL, YOL);
+    kontrol('ayardaki yolla açılan menünün alt bağlantısı tıklanıyor',
+      a && a.yol === 'ilk' && a.metin === 'Kullanıcılar', JSON.stringify(a));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], {
+      ogeler: [{ yazi: 'Abone' }, { yazi: 'Tanımlar', altlar: ['Kullanıcılar'] }],
+    });
+    kontrol('rapor menüsü de ayar yolu da yoksa uydurmuyor',
+      sayfa.rd.menuAc(YOL) === null);
     kontrol('menüdekiler hata iletisi için listeleniyor',
       sayfa.rd.menuOgeleri().join(' · ') === '1) Abone · 2) Tanımlar Kullanıcılar',
       sayfa.rd.menuOgeleri().join(' · '));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], {
+      ogeler: [{ yazi: 'Rapor Kuyruğu', altlar: ['Kuyruk'] }, { yazi: 'Abone' }],
+    });
+    m = sayfa.rd.menuAc(YOL);
+    kontrol('tam eşleşme yoksa Rapor ile başlayan menü kullanılıyor',
+      m && m.yol === 'metin' && m.metin === 'Rapor Kuyruğu', JSON.stringify(m));
   }
 
   console.log('\nWhatsApp gönderen numarası');
