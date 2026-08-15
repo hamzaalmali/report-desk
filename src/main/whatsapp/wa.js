@@ -318,6 +318,19 @@ async function cikisYap() {
 const XLSX_TUR = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const GONDERIM_ARASI = 3000;
 
+const TURLER = {
+  '.xlsx': XLSX_TUR,
+  '.xlsm': 'application/vnd.ms-excel.sheet.macroEnabled.12',
+  '.xls': 'application/vnd.ms-excel',
+  '.csv': 'text/csv',
+  '.pdf': 'application/pdf',
+  '.zip': 'application/zip',
+};
+
+function dosyaTuru(ad) {
+  return TURLER[path.extname(String(ad || '')).toLowerCase()] || XLSX_TUR;
+}
+
 function bagliMi() {
   if (!sock || durum.asama !== 'bagli') throw new Error('WhatsApp bağlı değil.');
   return sock;
@@ -341,13 +354,14 @@ async function gruplariGetir() {
 
 async function belgeGonder(jid, dosyaYolu, dosyaAdi, aciklama) {
   const s = bagliMi();
+  const ad = dosyaAdi || path.basename(dosyaYolu);
   const veri = fs.readFileSync(dosyaYolu);
-  await s.sendMessage(jid, {
+  yanitiIsaretle(await s.sendMessage(jid, {
     document: veri,
-    fileName: dosyaAdi,
-    mimetype: XLSX_TUR,
+    fileName: ad,
+    mimetype: dosyaTuru(ad),
     caption: aciklama || '',
-  });
+  }));
 }
 
 async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme) {
@@ -369,6 +383,6 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
-  gruplariGetir, belgeGonder, topluBelgeGonder,
+  gruplariGetir, belgeGonder, topluBelgeGonder, dosyaTuru,
   gonderenNumara, mesajMetni, gonder, sor,
 };

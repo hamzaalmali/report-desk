@@ -537,6 +537,8 @@ async function waRaporKomutu(b) {
 
   await b.gonder('Portala giriliyor…');
   const ayarlar = portalAyarlari();
+  const haber = (metin) => { b.gonder(metin).catch(() => { }); };
+
   const sonuc = await portaliCalistir({
     numara: b.gonderen,
     onayKodu: async (deneme, sonHata) => {
@@ -545,12 +547,28 @@ async function waRaporKomutu(b) {
         + (deneme > 1 ? ` (${deneme}. deneme)` : '');
       return b.sor(soru, (ayarlar.onaySn || 180) * 1000);
     },
+    ilerleme: (o) => {
+      if (o.kod === 'rapor-kaydet' && o.durum === 'bitti') {
+        haber(`Rapor kuyruğa alındı. Hazırlanması bekleniyor — her ${ayarlar.yenilemeSn} `
+          + `saniyede bir bakılacak (en fazla ${ayarlar.beklemeDk} dakika).`);
+      }
+    },
   });
 
   db.logYaz(null, 'portal', `WhatsApp isteği (${b.gonderen}) → ${sonuc.dosyaAdi || 'dosya yok'}`);
-  return `Rapor indirildi.\n\nDosya: ${sonuc.dosyaAdi || '-'}\n`
-    + `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
-    + `Klasör: ${sonuc.klasor}`;
+
+  const bilgi = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})`;
+  if (sonuc.dosya) {
+    try {
+      await wa.belgeGonder(b.sohbet, sonuc.dosya, sonuc.dosyaAdi, bilgi);
+      return null;
+    } catch (e) {
+      kayit(`Rapor dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
+      return `Rapor indirildi ama dosya gönderilemedi: ${e.message}\n\n`
+        + `Dosya: ${sonuc.dosyaAdi || '-'}\n${bilgi}\nKlasör: ${sonuc.klasor}`;
+    }
+  }
+  return `Rapor indirilemedi — dosya oluşmadı.\n${bilgi}\nKlasör: ${sonuc.klasor}`;
 }
 
 const KILITSIZ = new Set([

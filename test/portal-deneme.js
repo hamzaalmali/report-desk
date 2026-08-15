@@ -85,8 +85,8 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
       <ul><li>00:00</li><li>01:00</li><li>02:00</li></ul>
     </div>
   </div>
-  <input id="ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input"
-         type="button" value="Rapor İndir" />
+  <input id="ctl00_ContentPlaceHolder1_btnRaporKaydet_input"
+         type="button" value="Raporu Kaydet" />
   <script>
     function kur(id) {
       var acici = function () {
@@ -105,16 +105,40 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
     }
     kur('ctl00_ContentPlaceHolder1_cmbRaporlar');
     kur('ctl00_ContentPlaceHolder1_cmbSAAT');
-    document.getElementById('ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input')
+    document.getElementById('ctl00_ContentPlaceHolder1_btnRaporKaydet_input')
       .addEventListener('click', function () {
         var b = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput').value;
         var s = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput').value;
         var r = document.getElementById('ctl00_ContentPlaceHolder1_cmbRaporlar_Input').value;
         var t = document.getElementById('ctl00_ContentPlaceHolder1_cmbSAAT_Input').value;
-        window.location = '/indir?bas=' + encodeURIComponent(b) + '&son=' + encodeURIComponent(s)
+        window.location = '/kaydet?bas=' + encodeURIComponent(b) + '&son=' + encodeURIComponent(s)
           + '&rapor=' + encodeURIComponent(r) + '&saat=' + encodeURIComponent(t);
       });
   </script>`);
+
+const HAZIR_YENILEME = 2;
+
+const KUYRUK = (yenileme) => {
+  const hazir = yenileme >= HAZIR_YENILEME;
+  return SAYFA('Rapor Kuyrugu', `
+  <h1>Rapor Kuyruğu</h1>
+  <input id="ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input"
+         type="button" value="Yenile" />
+  <table id="ctl00_ContentPlaceHolder1_grdRaporKuyruk"><tbody>
+    <tr>
+      <td>AYS Kesintiler Form Detay</td>
+      <td>${hazir ? 'Tamamlandı' : 'Hazırlanıyor'}</td>
+      <td><input id="ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input"
+                 type="button" value="Rapor İndir" ${hazir ? '' : 'disabled'} /></td>
+    </tr>
+  </tbody></table>
+  <script>
+    document.getElementById('ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input')
+      .addEventListener('click', function () { window.location = '/Kuyruk.aspx'; });
+    document.getElementById('ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input')
+      .addEventListener('click', function () { window.location = '/indir'; });
+  </script>`);
+};
 
 function govdeOku(istek) {
   return new Promise((coz) => {
@@ -150,8 +174,17 @@ function sunucuKur(kayit) {
       }
       return yolla(ONAY);
     }
+    if (url.pathname === '/kaydet') {
+      kayit.kaydet = Object.fromEntries(url.searchParams);
+      kayit.yenileme = 0;
+      return yolla(KUYRUK(0));
+    }
+    if (url.pathname === '/Kuyruk.aspx') {
+      kayit.yenileme = (kayit.yenileme || 0) + 1;
+      return yolla(KUYRUK(kayit.yenileme));
+    }
     if (url.pathname === '/indir') {
-      kayit.indirme = Object.fromEntries(url.searchParams);
+      kayit.indirme = { yenileme: kayit.yenileme };
       return yolla('sahte-rapor-icerigi', 'application/octet-stream', {
         'Content-Disposition': 'attachment; filename="Kesintiler.xlsx"',
       });
@@ -192,6 +225,8 @@ app.whenReady().then(async () => {
         saat: '01:00',
         gunGeri: 1,
         onaySn: 30,
+        yenilemeSn: 5,
+        beklemeDk: 2,
         gorunur,
         kapat: true,
         menuXpath: MENU_XPATH,
@@ -216,17 +251,28 @@ app.whenReady().then(async () => {
     kontrol('onay kodu bir kez soruldu ve siteye yazıldı',
       onaySorulari.length === 1 && kayit.kod === KOD, `${onaySorulari.length} / ${kayit.kod}`);
     kontrol('rapor adı listeden seçildi',
-      kayit.indirme && kayit.indirme.rapor === RAPOR, kayit.indirme && kayit.indirme.rapor);
-    kontrol('saat kutusu doldu', kayit.indirme && kayit.indirme.saat === '01:00',
-      kayit.indirme && kayit.indirme.saat);
+      kayit.kaydet && kayit.kaydet.rapor === RAPOR, kayit.kaydet && kayit.kaydet.rapor);
+    kontrol('saat kutusu doldu', kayit.kaydet && kayit.kaydet.saat === '01:00',
+      kayit.kaydet && kayit.kaydet.saat);
 
     const bugun = new Date();
     const dun = new Date(bugun.getFullYear(), bugun.getMonth(), bugun.getDate() - 1);
     const bicim = (d) => `${String(d.getDate()).padStart(2, '0')}.`
       + `${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
     kontrol('başlangıç dün, bitiş bugün gitti',
-      kayit.indirme && kayit.indirme.bas === bicim(dun) && kayit.indirme.son === bicim(bugun),
-      kayit.indirme && `${kayit.indirme.bas} → ${kayit.indirme.son}`);
+      kayit.kaydet && kayit.kaydet.bas === bicim(dun) && kayit.kaydet.son === bicim(bugun),
+      kayit.kaydet && `${kayit.kaydet.bas} → ${kayit.kaydet.son}`);
+
+    kontrol('rapor hazır olana dek kuyruk yenilendi',
+      kayit.yenileme === HAZIR_YENILEME, `${kayit.yenileme} yenileme`);
+    kontrol('indirmeye ancak rapor hazır olunca basıldı',
+      kayit.indirme && kayit.indirme.yenileme >= HAZIR_YENILEME,
+      JSON.stringify(kayit.indirme));
+    const kuyrukAdimi = adimlar.find((a) => a.kod === 'kuyruk');
+    kontrol('kuyruk adımı bekleme sayısını ve satırı bildiriyor',
+      !!kuyrukAdimi && kuyrukAdimi.sonuc.yenileme === HAZIR_YENILEME
+      && /Tamamlandı/.test(kuyrukAdimi.sonuc.satir || '') && kuyrukAdimi.sonuc.hemenHazir === false,
+      kuyrukAdimi && JSON.stringify(kuyrukAdimi.sonuc));
 
     kontrol('dosya indirilip klasöre kaydedildi',
       !!sonuc.dosya && fs.existsSync(sonuc.dosya)
@@ -237,8 +283,8 @@ app.whenReady().then(async () => {
     const dosyalar = fs.readdirSync(sonuc.klasor);
     const htmlSayisi = dosyalar.filter((d) => d.endsWith('.html')).length;
     const pngSayisi = dosyalar.filter((d) => d.endsWith('.png')).length;
-    kontrol('her adımın HTML kaydı alındı', htmlSayisi >= 8, `${htmlSayisi} html`);
-    kontrol('her adımın ekran görüntüsü alındı', pngSayisi === 8, `${pngSayisi} png`);
+    kontrol('her adımın HTML kaydı alındı', htmlSayisi >= 10, `${htmlSayisi} html`);
+    kontrol('her adımın ekran görüntüsü alındı', pngSayisi === 10, `${pngSayisi} png`);
     kontrol('iframe içeriği ayrıca kaydedildi',
       dosyalar.some((d) => d.includes('--cerceve1.html')),
       dosyalar.filter((d) => d.endsWith('.html')).join(' '));
@@ -258,7 +304,7 @@ app.whenReady().then(async () => {
       !girisHtml.includes(SIFRE) && !girisHtml.includes(KULLANICI));
 
     kontrol('tüm adımlar bitti olarak işaretlendi',
-      adimlar.length === 8 && adimlar.every((a) => a.durum === 'bitti'),
+      adimlar.length === 10 && adimlar.every((a) => a.durum === 'bitti'),
       adimlar.map((a) => `${a.kod}:${a.durum}`).join(' '));
     kontrol('iş bitince kilit kalkıyor', portal.durumAl().calisiyor === false);
   }

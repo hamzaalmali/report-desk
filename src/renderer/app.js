@@ -1573,7 +1573,9 @@ function waCiz(d) {
           <div class="text-[12px] text-fg-2">
             <b>“rapor gönder”</b> komutu ayrı çalışır: yalnızca <b>Ayarlar → Rapor portalı</b>
             bölümünde kullanıcı adı ve şifresi tanımlı numaralar kullanabilir, grup
-            sohbetlerinde çalışmaz. Onay kodu aynı sohbetten sorulur.
+            sohbetlerinde çalışmaz. Onay kodu aynı sohbetten sorulur. Rapor kuyruğa
+            alındıktan sonra hazırlanması beklenir, hazır olunca Excel dosyası aynı
+            sohbete gönderilir.
           </div>
           <div class="flex items-end gap-2">
             <label class="flex flex-1 flex-col gap-1">
@@ -1883,6 +1885,8 @@ function portalKarti(ayar, hesaplar) {
         ${alan('pSaat', 'Saat', ayar.saat, 'text', '01:00')}
         ${alan('pGunGeri', 'Başlangıç kaç gün geriden', ayar.gunGeri, 'number', '1')}
         ${alan('pOnaySn', 'Onay kodu bekleme (saniye)', ayar.onaySn, 'number', '180')}
+        ${alan('pYenilemeSn', 'Kuyruk yenileme aralığı (saniye)', ayar.yenilemeSn, 'number', '120')}
+        ${alan('pBeklemeDk', 'Rapor için azami bekleme (dakika)', ayar.beklemeDk, 'number', '60')}
         <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
           <input type="checkbox" id="pGorunur" class="size-4 accent-[#3ecf8e]"
                  ${ayar.gorunur ? 'checked' : ''} /> Tarayıcı penceresi görünsün
@@ -2039,6 +2043,8 @@ function portalIlerlemeCiz() {
           <span class="w-4 shrink-0">${simge[a.durum] || '·'}</span>
           <span class="min-w-0 flex-1">
             ${kacar(a.ad)}
+            ${a.durum === 'calisiyor' && a.bilgi
+              ? `<div class="text-[11.5px] text-fg-3">${kacar(a.bilgi)}</div>` : ''}
             ${a.hata ? `<div class="text-[11.5px] text-danger">${kacar(a.hata)}</div>` : ''}
             ${a.iz && a.iz.dosya
               ? `<div class="font-mono text-[10.5px] text-fg-3">${kacar(a.iz.dosya)}</div>` : ''}
@@ -2092,6 +2098,8 @@ function portalBagla(ayar) {
         saat: el('pSaat').value,
         gunGeri: el('pGunGeri').value,
         onaySn: el('pOnaySn').value,
+        yenilemeSn: el('pYenilemeSn').value,
+        beklemeDk: el('pBeklemeDk').value,
         gorunur: el('pGorunur').checked,
         kapat: el('pKapat').checked,
         menuXpath: el('pMenu').value,

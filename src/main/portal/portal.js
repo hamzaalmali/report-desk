@@ -16,13 +16,18 @@ const ALAN = {
   basTarih: 'ctl00_ContentPlaceHolder1_dateTimeBASTARIH',
   sonTarih: 'ctl00_ContentPlaceHolder1_dateTimeSONTARIH',
   saat: 'ctl00_ContentPlaceHolder1_cmbSAAT',
+  kaydet: 'ctl00_ContentPlaceHolder1_btnRaporKaydet_input',
+  yenile: 'ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input',
   indir: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input',
 };
+
+const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 
 const BOLME = 'persist:portal';
 const SAYFA_SURESI = 60000;
 const OGE_SURESI = 30000;
 const INDIRME_SURESI = 180000;
+const EN_KISA_YENILEME = 5;
 
 const YARDIM = `
 (function () {
@@ -66,6 +71,37 @@ const YARDIM = `
   };
   rd.denetim = function (id) {
     try { return window.$find ? window.$find(id) : null; } catch (e) { return null; }
+  };
+  rd.etkin = function (e) {
+    if (!e || e.disabled) return false;
+    if (/rbDisabled|aspNetDisabled|rgDisabled/.test(e.className || '')) return false;
+    var s = e.closest ? e.closest('.RadButton, span, div') : null;
+    if (s && /rbDisabled/.test(s.className || '')) return false;
+    return rd.gorunur(e);
+  };
+  rd.dugme = function (id) {
+    var e = rd.bul(id);
+    if (e && !rd.etkin(e)) return 'pasif';
+    if (e && rd.tikla(e)) return 'tik';
+    var c = rd.denetim(String(id).replace(/_input$/, ''));
+    if (c && c.click) { try { c.click(); return 'api'; } catch (x) { } }
+    return null;
+  };
+  rd.satirMetni = function (e) {
+    var s = e && e.closest ? e.closest('tr') : null;
+    if (!s) return '';
+    return (s.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
+  };
+  rd.kuyruk = function (id, secici) {
+    var hepsi = [].slice.call(document.querySelectorAll(secici));
+    var e = rd.bul(id) || hepsi[0] || null;
+    return {
+      hazir: !!(e && rd.etkin(e)),
+      id: e ? e.id : null,
+      kendi: !!rd.bul(id),
+      sayi: hepsi.length,
+      satir: rd.satirMetni(e),
+    };
   };
   rd.mesgul = function () {
     if (document.readyState !== 'complete') return true;
@@ -132,6 +168,10 @@ const YARDIM = `
     if ((g.value || '').trim() !== metin) rd.yaz(g, metin);
     return g.value;
   };
+  try {
+    window.alert = function () { };
+    window.confirm = function () { return true; };
+  } catch (e) { }
 })();
 `;
 
@@ -377,6 +417,17 @@ async function calistir(istek) {
     return false;
   };
 
+  const kesikliUyu = async (ms, her = () => { }) => {
+    const bitis = Date.now() + ms;
+    let sonSaniye = -1;
+    while (Date.now() < bitis) {
+      kontrol();
+      const kalan = Math.max(0, Math.round((bitis - Date.now()) / 1000));
+      if (kalan !== sonSaniye) { sonSaniye = kalan; her(kalan); }
+      await uyu(Math.min(500, Math.max(1, bitis - Date.now())));
+    }
+  };
+
   const kaydet = async (kod) => {
     sira++;
     let baslik = '';
@@ -412,8 +463,12 @@ async function calistir(istek) {
     adimlar.push(kayit);
     bildir({ ...kayit });
     log(`Portal adımı: ${ad}`);
+    const bilgi = (metin) => {
+      kayit.bilgi = metin;
+      bildir({ ...kayit });
+    };
     try {
-      const sonuc = await fn();
+      const sonuc = await fn(bilgi);
       const iz = await kaydet(kod);
       Object.assign(kayit, {
         durum: 'bitti', bitti: new Date().toISOString(), sonuc: sonuc || null, iz,
@@ -598,13 +653,82 @@ async function calistir(istek) {
       return { bas, son, saat, saatYontem, istenenBas: aralik.bas.metin, istenenSon: aralik.son.metin };
     });
 
-    const sonuc = await adim('indir', 'Rapor indiriliyor', async () => {
-      const varMi = await dene(`!!window.__rd.bul(${JSON.stringify(ALAN.indir)})`);
-      if (!varMi) {
-        throw new Error('İndirme düğmesi ekranda yok — rapor kuyruğa düşmemiş olabilir. '
-          + 'Kaydedilen HTML dosyasından bakılabilir.');
+    await adim('rapor-kaydet', 'Rapor kuyruğa gönderiliyor', async () => {
+      const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kaydet)})`,
+        'Raporu kaydet düğmesi bulunamadı — sayfa ya da düğme adı değişmiş olabilir', 20000);
+      const yontem = await jsC(c, `window.__rd.dugme(${JSON.stringify(ALAN.kaydet)})`);
+      if (yontem === 'pasif') {
+        throw new Error('Raporu kaydet düğmesi pasif — zorunlu bir alan boş kalmış olabilir.');
       }
-      await js(`window.__rd.tikla(window.__rd.bul(${JSON.stringify(ALAN.indir)}))`);
+      if (!yontem) throw new Error('Raporu kaydet düğmesine tıklanamadı.');
+
+      await uyu(1500);
+      await sakinlesme(45000);
+      aktifCerceve = null;
+      await cerceveSec(
+        `(!!window.__rd.bul(${JSON.stringify(ALAN.yenile)})`
+        + ` || !!document.querySelector(${JSON.stringify(KUYRUK_SECICI)})`
+        + ' || !!document.querySelector(\'[id*="grdRaporKuyruk"]\'))',
+        'rapor kuyruğu ekranı açılmadı — rapor kuyruğa alınmamış olabilir', SAYFA_SURESI
+      );
+      return { yontem, url: pencere.webContents.getURL() };
+    });
+
+    const KUYRUK = `window.__rd.kuyruk(${JSON.stringify(ALAN.indir)},`
+      + ` ${JSON.stringify(KUYRUK_SECICI)})`;
+
+    const kuyruk = await adim('kuyruk', 'Raporun hazırlanması bekleniyor', async (bilgi) => {
+      const araMs = Math.max(EN_KISA_YENILEME, Number(ayarlar.yenilemeSn) || 120) * 1000;
+      const sinirDk = Math.max(1, Number(ayarlar.beklemeDk) || 60);
+      const bitis = Date.now() + sinirDk * 60000;
+      let tur = 0;
+      let son = null;
+      let basarisizYenileme = 0;
+
+      for (;;) {
+        son = await dene(KUYRUK);
+        if (son && son.hazir) {
+          log(`Portal: rapor hazır (${tur} yenileme) — ${son.satir || 'satır okunamadı'}`);
+          if (tur === 0) {
+            log('Portal: rapor beklemeden hazır göründü, kuyruktaki satırın tarihini doğrulayın.');
+          }
+          return { ...son, yenileme: tur, hemenHazir: tur === 0 };
+        }
+        if (Date.now() >= bitis) {
+          throw new Error(`Rapor ${sinirDk} dakikada hazırlanmadı `
+            + `(${tur} yenileme). Kuyruk satırı: ${(son && son.satir) || 'okunamadı'}`);
+        }
+
+        tur++;
+        const durumMetni = (son && son.satir) || 'kuyruk okunamadı';
+        log(`Portal: rapor henüz hazır değil — ${durumMetni}`);
+        await kesikliUyu(Math.min(araMs, Math.max(0, bitis - Date.now())), (kalan) => {
+          bilgi(`${tur}. yenilemeye ${kalan} sn — ${durumMetni}`);
+        });
+
+        bilgi(`${tur}. yenileme yapılıyor…`);
+        const y = await dene(`window.__rd.dugme(${JSON.stringify(ALAN.yenile)})`);
+        if (!y || y === 'pasif') {
+          basarisizYenileme++;
+          log(`Portal: kuyruk yenileme düğmesine tıklanamadı (${basarisizYenileme}).`);
+          if (basarisizYenileme >= 3) {
+            throw new Error('Kuyruk yenileme düğmesi üst üste üç kez çalışmadı — '
+              + 'oturum düşmüş ya da sayfa değişmiş olabilir.');
+          }
+        } else {
+          basarisizYenileme = 0;
+        }
+        await uyu(1200);
+        await sakinlesme(30000);
+      }
+    });
+
+    const sonuc = await adim('indir', 'Rapor indiriliyor', async () => {
+      const hedef = (kuyruk && kuyruk.id) || ALAN.indir;
+      const yontem = await js(`window.__rd.dugme(${JSON.stringify(hedef)})`);
+      if (!yontem || yontem === 'pasif') {
+        throw new Error('İndirme düğmesine tıklanamadı — rapor kuyruğu değişmiş olabilir.');
+      }
       const zamanAsimi = new Promise((_c, red) => {
         const sayac = setTimeout(() => red(new Error('İndirme süresi doldu.')), INDIRME_SURESI);
         indirme.sozu.then(() => clearTimeout(sayac), () => clearTimeout(sayac));
@@ -618,6 +742,9 @@ async function calistir(istek) {
       dosyaAdi: sonuc ? sonuc.ad : null,
       boyut: sonuc ? sonuc.boyut : null,
       adimlar,
+      kuyruk: kuyruk
+        ? { yenileme: kuyruk.yenileme, satir: kuyruk.satir, hemenHazir: !!kuyruk.hemenHazir }
+        : null,
       aralik: { bas: aralik.bas.metin, son: aralik.son.metin, saat: ayarlar.saat },
     };
     fs.writeFileSync(path.join(klasor, 'ozet.json'), JSON.stringify(ozet, null, 2), 'utf8');
@@ -639,4 +766,7 @@ async function calistir(istek) {
   }
 }
 
-module.exports = { calistir, durumAl, iptal, tarihAraligi, dosyaAdiTemiz, gizle, ALAN };
+module.exports = {
+  calistir, durumAl, iptal, tarihAraligi, dosyaAdiTemiz, gizle,
+  ALAN, KUYRUK_SECICI, YARDIM,
+};

@@ -54,6 +54,50 @@ async function genisTabloBul() {
   return null;
 }
 
+function sahteSayfa(yardimKodu, tanimlar = []) {
+  const sayfa = { tiklananlar: [] };
+
+  const oge = (t) => {
+    const e = {
+      id: t.id,
+      tagName: 'INPUT',
+      className: t.sinif || '',
+      disabled: !!t.kapali,
+      getBoundingClientRect: () => (t.gizli ? { width: 0, height: 0 } : { width: 90, height: 22 }),
+      scrollIntoView() { },
+      focus() { },
+      dispatchEvent() { return true; },
+      click() { sayfa.tiklananlar.push(e.id); },
+      closest: (secici) => (secici === 'tr' ? { innerText: t.satir || '' } : null),
+    };
+    return e;
+  };
+
+  const ogeler = tanimlar.map(oge);
+
+  const eslesir = (e, secici) => (secici.match(/id\*="([^"]+)"/g) || [])
+    .map((p) => p.slice(5, -1))
+    .every((p) => String(e.id).includes(p));
+
+  const belge = {
+    getElementById: (id) => ogeler.find((e) => e.id === id) || null,
+    querySelectorAll: (secici) => ogeler.filter((e) => eslesir(e, secici)),
+    querySelector: (secici) => ogeler.find((e) => eslesir(e, secici)) || null,
+  };
+
+  const pencere = {};
+  require('node:vm').runInNewContext(yardimKodu, {
+    window: pencere,
+    document: belge,
+    getComputedStyle: () => ({ visibility: 'visible' }),
+  });
+
+  sayfa.pencere = pencere;
+  sayfa.belge = belge;
+  sayfa.rd = pencere.__rd;
+  return sayfa;
+}
+
 let gecti = 0, kaldi = 0;
 function kontrol(ad, kosul, ayrinti = '') {
   if (kosul) { gecti++; console.log(`  ✓ ${ad}`); }
@@ -609,6 +653,67 @@ async function main() {
       portal.gizle('abcdef', ['ab']) === 'abcdef');
     kontrol('dosya adı güvenli hale geliyor',
       portal.dosyaAdiTemiz('Rapor / Giriş: 2026?') === 'Rapor-Giriş-2026');
+
+    kontrol('kuyruk bekleme ayarları varsayılanla geliyor',
+      portalAyar.oku(db).yenilemeSn === 120 && portalAyar.oku(db).beklemeDk === 60,
+      `${portalAyar.oku(db).yenilemeSn} sn / ${portalAyar.oku(db).beklemeDk} dk`);
+    const bekAyar = portalAyar.yaz(db, { yenilemeSn: 90, beklemeDk: 30 });
+    kontrol('kuyruk bekleme ayarları kaydediliyor',
+      bekAyar.yenilemeSn === 90 && bekAyar.beklemeDk === 30,
+      JSON.stringify({ y: bekAyar.yenilemeSn, b: bekAyar.beklemeDk }));
+    const kisaAyar = portalAyar.yaz(db, { yenilemeSn: 1, beklemeDk: 0 });
+    kontrol('çok kısa yenileme alt sınıra çekiliyor',
+      kisaAyar.yenilemeSn === 5 && kisaAyar.beklemeDk === 1,
+      JSON.stringify({ y: kisaAyar.yenilemeSn, b: kisaAyar.beklemeDk }));
+    portalAyar.yaz(db, { yenilemeSn: '', beklemeDk: '' });
+    kontrol('ayar boşaltılınca 2 dakikaya dönüyor',
+      portalAyar.oku(db).yenilemeSn === 120 && portalAyar.oku(db).beklemeDk === 60);
+  }
+
+  console.log('\nPortal kuyruğu (sayfa içi kod)');
+  {
+    const portal = require('../src/main/portal/portal');
+    const S = portal.KUYRUK_SECICI;
+    const HAZIR = portal.ALAN.indir;
+    const BEKLEYEN = HAZIR.replace('ctl04', 'ctl06');
+
+    let sayfa = sahteSayfa(portal.YARDIM, [
+      { id: HAZIR, kapali: true, satir: 'Günlük Rapor Hazırlanıyor' },
+    ]);
+    let k = sayfa.rd.kuyruk(HAZIR, S);
+    kontrol('rapor hazırlanırken indirme düğmesi hazır sayılmıyor',
+      k.hazir === false && k.sayi === 1 && k.satir.includes('Hazırlanıyor'), JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [
+      { id: HAZIR, satir: 'Günlük Rapor Tamamlandı' },
+    ]);
+    k = sayfa.rd.kuyruk(HAZIR, S);
+    kontrol('rapor bitince hazır görünüyor',
+      k.hazir === true && k.id === HAZIR && k.kendi === true, JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [{ id: BEKLEYEN, satir: 'Başka satır' }]);
+    k = sayfa.rd.kuyruk(HAZIR, S);
+    kontrol('beklenen satır yoksa kuyruktaki ilk düğmeye düşülüyor',
+      k.hazir === true && k.id === BEKLEYEN && k.kendi === false, JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, []);
+    k = sayfa.rd.kuyruk(HAZIR, S);
+    kontrol('kuyruk boşken hazır denmiyor',
+      k.hazir === false && k.sayi === 0 && k.id === null, JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [{ id: portal.ALAN.kaydet }]);
+    kontrol('düğmeye tıklanınca tıklandığı bildiriliyor',
+      sayfa.rd.dugme(portal.ALAN.kaydet) === 'tik' && sayfa.tiklananlar[0] === portal.ALAN.kaydet,
+      sayfa.tiklananlar.join(', '));
+
+    sayfa = sahteSayfa(portal.YARDIM, [{ id: portal.ALAN.kaydet, kapali: true }]);
+    kontrol('pasif düğme tıklanmıyor, pasif diye bildiriliyor',
+      sayfa.rd.dugme(portal.ALAN.kaydet) === 'pasif' && sayfa.tiklananlar.length === 0);
+
+    sayfa = sahteSayfa(portal.YARDIM, []);
+    kontrol('olmayan düğme sessizce başarısız oluyor', sayfa.rd.dugme('yokBoyleBirSey') === null);
+    kontrol('sayfa kodu tarayıcıyı kilitleyen kutuları devre dışı bırakıyor',
+      sayfa.pencere.confirm() === true && sayfa.pencere.alert() === undefined);
   }
 
   console.log('\nWhatsApp gönderen numarası');
@@ -632,6 +737,14 @@ async function main() {
       === '905551112233');
     kontrol('kendi telefonundan yazınca gönderen kendi numaramız',
       (await kim({ remoteJid: '120363@g.us', fromMe: true })) === '905388179495');
+
+    kontrol('belge türü uzantıdan seçiliyor',
+      wa.dosyaTuru('Kesintiler.xlsx').endsWith('spreadsheetml.sheet')
+      && wa.dosyaTuru('Kesintiler.xls') === 'application/vnd.ms-excel'
+      && wa.dosyaTuru('Kesintiler.csv') === 'text/csv',
+      [wa.dosyaTuru('a.xls'), wa.dosyaTuru('a.csv')].join(' | '));
+    kontrol('bilinmeyen uzantı Excel sayılıyor',
+      wa.dosyaTuru('rapor') === wa.dosyaTuru('rapor.xlsx'));
 
     const metin = (message) => wa.mesajMetni({ message });
     kontrol('mesaj metni her biçimden okunuyor',
