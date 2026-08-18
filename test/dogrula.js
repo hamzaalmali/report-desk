@@ -1295,6 +1295,12 @@ async function main() {
     const anaVt = db.yol();
     db.ac(kilitVt);
 
+    kontrol('varsayılan durum adresi depo kökünde durmuyor',
+      kilit.VARSAYILAN_ADRES.includes('/.github/durum.json')
+      && fs.existsSync(path.join(__dirname, '..', '.github', 'durum.json'))
+      && !fs.existsSync(path.join(__dirname, '..', 'durum.json')),
+      kilit.VARSAYILAN_ADRES);
+
     let d = await kilit.kur(db, () => { }, adres);
     kontrol('açıkken kilit yok', d.kilitli === false && !d.sonHata, JSON.stringify(d));
     kontrol('kontrol zamanı kaydediliyor', !!d.sonKontrol);

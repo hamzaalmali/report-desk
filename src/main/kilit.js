@@ -2,7 +2,7 @@
 
 'use strict';
 
-const VARSAYILAN_ADRES = 'https://raw.githubusercontent.com/hamzaalmali/report-desk/main/durum.json';
+const VARSAYILAN_ADRES = 'https://raw.githubusercontent.com/hamzaalmali/report-desk/main/.github/durum.json';
 const ARALIK = 6 * 60 * 60 * 1000;
 const ZAMAN_ASIMI = 10000;
 
