@@ -49,33 +49,51 @@ function hucreDegeri(cell) {
   return v;
 }
 
-function sayfaOku(ws) {
-  const ilk = ws.getRow(1);
-  const sonSutun = Math.max(1, ws.actualColumnCount || ws.columnCount || 1);
-  const basliklar = [];
+const EN_COK_BASLIK_ARAMA = 40;
+
+function satirAnahtarlari(ws, r, sonSutun) {
+  const row = ws.getRow(r);
+  const hepsi = [];
   for (let c = 1; c <= sonSutun; c++) {
-    basliklar.push({
-      ad: hucreMetni(ilk.getCell(c)),
-      anahtar: key(hucreMetni(ilk.getCell(c))),
-      genislik: ws.getColumn(c).width || null,
-    });
+    const ad = hucreMetni(row.getCell(c));
+    hepsi.push({ sutun: c, ad, anahtar: key(ad) });
   }
-  while (basliklar.length && !basliklar[basliklar.length - 1].ad) basliklar.pop();
+  return hepsi;
+}
+
+function sayfaOku(ws, kodDesenleri) {
+  const sonSutun = Math.max(1, ws.actualColumnCount || 0, ws.columnCount || 0);
+  const aramaSiniri = Math.min(Math.max(1, ws.actualRowCount || ws.rowCount || 1),
+    EN_COK_BASLIK_ARAMA);
+
+  let baslikSatiri = 1;
+  let kodVar = false;
+  for (let r = 1; r <= aramaSiniri; r++) {
+    if (sutunBul(satirAnahtarlari(ws, r, sonSutun), kodDesenleri) >= 0) {
+      baslikSatiri = r;
+      kodVar = true;
+      break;
+    }
+  }
+
+  const basliklar = satirAnahtarlari(ws, baslikSatiri, sonSutun)
+    .filter((b) => b.ad)
+    .map((b) => ({ ...b, genislik: ws.getColumn(b.sutun).width || null }));
 
   const satirlar = [];
   ws.eachRow((row, r) => {
-    if (r === 1) return;
+    if (r <= baslikSatiri) return;
     const veri = [];
     let dolu = false;
-    for (let c = 1; c <= basliklar.length; c++) {
-      const v = hucreDegeri(row.getCell(c));
+    for (const b of basliklar) {
+      const v = hucreDegeri(row.getCell(b.sutun));
       veri.push(v);
       if (v != null && String(v).trim() !== '') dolu = true;
     }
     if (dolu) satirlar.push(veri);
   });
 
-  return { ad: ws.name, basliklar, satirlar };
+  return { ad: ws.name, basliklar, satirlar, baslikSatiri, kodVar };
 }
 
 async function dosyaOku(yol, kodDesenleri) {
@@ -83,10 +101,10 @@ async function dosyaOku(yol, kodDesenleri) {
   await wb.xlsx.readFile(yol);
   let ilkDolu = null;
   for (const ws of wb.worksheets) {
-    const o = sayfaOku(ws);
+    const o = sayfaOku(ws, kodDesenleri);
     if (!o.satirlar.length && !o.basliklar.length) continue;
     if (!ilkDolu) ilkDolu = o;
-    if (sutunBul(o.basliklar, kodDesenleri) >= 0) return o;
+    if (o.kodVar) return o;
   }
   if (!ilkDolu) throw new Error(`Dosyada okunacak sayfa yok: ${path.basename(yol)}`);
   return ilkDolu;
@@ -171,8 +189,18 @@ function sayfaYaz(wb, ad, basliklar, satirlar, sec = {}) {
 }
 
 async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = () => { } }) {
-  const ana = await dosyaOku(anaDosya, KOD_DESEN);
-  const detay = await dosyaOku(detayDosya, KOD_DESEN);
+  let ana = await dosyaOku(anaDosya, KOD_DESEN);
+  let detay = await dosyaOku(detayDosya, KOD_DESEN);
+
+  if (sutunBul(ana.basliklar, TABLET_DESEN) >= 0
+    && sutunBul(detay.basliklar, TABLET_DESEN) < 0) {
+    [ana, detay] = [detay, ana];
+    log('Kesinti tablosu: dosyalar ters sırada gelmiş, liste ile detay yer değiştirildi.');
+  }
+  if (ana.baslikSatiri > 1 || detay.baslikSatiri > 1) {
+    log(`Kesinti tablosu: başlık satırı listede ${ana.baslikSatiri}., `
+      + `detayda ${detay.baslikSatiri}. satırda bulundu; üstteki satırlar atlandı.`);
+  }
 
   const anaKod = sutunBul(ana.basliklar, KOD_DESEN);
   const anaSure = sutunBul(ana.basliklar, SURE_DESEN);

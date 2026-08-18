@@ -617,18 +617,19 @@ async function main() {
     const anaYol = path.join(klasor, 'liste.xlsx');
     const detayYol = path.join(klasor, 'detay.xlsx');
 
-    const yazDosya = async (yol, sayfaAdi, basliklar, satirlar) => {
+    const yazDosya = async (yol, sayfaAdi, satirlar) => {
       const wb = new ExcelJS.Workbook();
       const ws = wb.addWorksheet(sayfaAdi);
-      ws.addRow(basliklar);
       for (const s of satirlar) ws.addRow(s);
       await wb.xlsx.writeFile(yol);
     };
 
     await yazDosya(anaYol, 'AnaListe', [
-      'KESİNTİNİN KODU (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)',
-      'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)',
-    ], [
+      ['Kesinti Raporu'],
+      [],
+      ['Parametre', 'BASTARIH=16.08.2026 SONTARIH=17.08.2026'],
+      ['KESİNTİNİN KODU (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)',
+        'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)'],
       [5001, 1, 'BURSA', 'KESTEL', 'OG HAT BAKIM', 10.4],
       [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5'],
       [5003, 1, 'YALOVA', 'MERKEZ', 'KUŞ ÇARPMASI', 6],
@@ -636,15 +637,16 @@ async function main() {
     ]);
 
     await yazDosya(detayYol, 'Detay', [
-      'KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)', 'KAYNAK TÜRÜ',
-      'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'TOPLAM ABONE', 'TABLET AÇIKLAMA',
-    ], [
-      [5001, 1, 'BURSA', 'KESTEL', 'KÖK', 'OG HAT BAKIM', 1500, 'not-1'],
-      [5001, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'OG HAT BAKIM', 200, 'not-1b'],
-      [5002, 1, 'BURSA', 'GÜRSU', 'Dagitim Transformatörü', 'AG ABONE KABLOSU', '1.250', 'kablo notu'],
-      [5003, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'KUŞ ÇARPMASI', 1000, ''],
-      [5004, 1, 'BURSA', 'NİLÜFER', 'Dagitim Merkezi', 'SCADA-MANEVRA', 40, 'osos notu'],
-      [5005, 1, 'BURSA', 'İNEGÖL', 'Dağıtım Transformatörü', 'AG ABONE KABLOSU', 10, ''],
+      [null, 'Detay Raporu'],
+      [],
+      [null, 'KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)', 'KAYNAK TÜRÜ',
+        'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'TOPLAM ABONE', 'TABLET AÇIKLAMA'],
+      [null, 5001, 1, 'BURSA', 'KESTEL', 'KÖK', 'OG HAT BAKIM', 1500, 'not-1'],
+      [null, 5001, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'OG HAT BAKIM', 200, 'not-1b'],
+      [null, 5002, 1, 'BURSA', 'GÜRSU', 'Dagitim Transformatörü', 'AG ABONE KABLOSU', '1.250', 'kablo notu'],
+      [null, 5003, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'KUŞ ÇARPMASI', 1000, ''],
+      [null, 5004, 1, 'BURSA', 'NİLÜFER', 'Dagitim Merkezi', 'SCADA-MANEVRA', 40, 'osos notu'],
+      [null, 5005, 1, 'BURSA', 'İNEGÖL', 'Dağıtım Transformatörü', 'AG ABONE KABLOSU', 10, ''],
     ]);
 
     const sonuc = await tablo.olustur({
@@ -722,6 +724,16 @@ async function main() {
     const dolu = ana.ws.getRow(1);
     kontrol('başlık satırı kalın ve süzgeçli',
       dolu.getCell(1).font && dolu.getCell(1).font.bold === true && !!ana.ws.autoFilter);
+
+    const tersKlasor = path.join(klasor, 'ters');
+    fs.mkdirSync(tersKlasor);
+    const ters = await tablo.olustur({
+      anaDosya: detayYol, detayDosya: anaYol,
+      hedefKlasor: tersKlasor, tarihMetni: '16.08.2026',
+    });
+    kontrol('dosyalar ters sırada verilirse kendiliğinden düzeltiliyor',
+      ters.ozet.toplam === 4 && ters.ozet.rekortman === 2 && ters.ozet.ikiIlce === 1,
+      JSON.stringify(ters.ozet));
 
     fs.rmSync(klasor, { recursive: true, force: true });
   }
