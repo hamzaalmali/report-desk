@@ -51,7 +51,8 @@ const ANA = SAYFA('Ana Sayfa', `
       <ul id="leftsidenav">
         ${[1, 2, 3, 4, 5].map((n) => `<li class="sub1"><a href="javascript:void(0)"
           >Menü ${n}</a></li>`).join('')}
-        <li class="sub1 t-indent" onclick="this.querySelector('ul').style.display='block'"
+        <li class="sub1 t-indent"
+          onclick="var u=this.querySelector('ul');u.style.display=u.style.display==='block'?'none':'block'"
           >RAPORLAR<ul id="altmenu" style="display:none">
             <li><a class="mlink" href="/Rapor.aspx" target="content">Raporlar</a></li>
             <li><a class="mlink" href="/Kuyruk.aspx" target="content">Rapor Kuyruğu</a></li>
@@ -65,6 +66,13 @@ const BOS = SAYFA('Bos', '<div>hoş geldiniz</div>');
 
 const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
   <h1>Rapor</h1>
+  <div id="ctl00_ContentPlaceHolder1_cmbILKODU">
+    <input id="ctl00_ContentPlaceHolder1_cmbILKODU_Input" readonly value="Seçiniz" />
+    <span id="ctl00_ContentPlaceHolder1_cmbILKODU_Arrow">▾</span>
+    <div id="ctl00_ContentPlaceHolder1_cmbILKODU_DropDown" style="display:none">
+      <ul><li>Seçiniz</li><li>Tümü</li><li>Bursa</li></ul>
+    </div>
+  </div>
   <div id="ctl00_ContentPlaceHolder1_cmbRaporlar">
     <input id="ctl00_ContentPlaceHolder1_cmbRaporlar_Input" readonly />
     <span id="ctl00_ContentPlaceHolder1_cmbRaporlar_Arrow">▾</span>
@@ -105,14 +113,17 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
     }
     kur('ctl00_ContentPlaceHolder1_cmbRaporlar');
     kur('ctl00_ContentPlaceHolder1_cmbSAAT');
+    kur('ctl00_ContentPlaceHolder1_cmbILKODU');
     document.getElementById('ctl00_ContentPlaceHolder1_btnRaporKaydet_input')
       .addEventListener('click', function () {
         var b = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput').value;
         var s = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput').value;
         var r = document.getElementById('ctl00_ContentPlaceHolder1_cmbRaporlar_Input').value;
         var t = document.getElementById('ctl00_ContentPlaceHolder1_cmbSAAT_Input').value;
+        var i = document.getElementById('ctl00_ContentPlaceHolder1_cmbILKODU_Input').value;
         window.location = '/kaydet?bas=' + encodeURIComponent(b) + '&son=' + encodeURIComponent(s)
-          + '&rapor=' + encodeURIComponent(r) + '&saat=' + encodeURIComponent(t);
+          + '&rapor=' + encodeURIComponent(r) + '&saat=' + encodeURIComponent(t)
+          + '&il=' + encodeURIComponent(i);
       });
   </script>`);
 
@@ -273,6 +284,8 @@ app.whenReady().then(async () => {
       kayit.kaydet && kayit.kaydet.rapor === RAPOR, kayit.kaydet && kayit.kaydet.rapor);
     kontrol('saat kutusu doldu', kayit.kaydet && kayit.kaydet.saat === '01:00',
       kayit.kaydet && kayit.kaydet.saat);
+    kontrol('il kodu Tümü seçildi', kayit.kaydet && kayit.kaydet.il === 'Tümü',
+      kayit.kaydet && kayit.kaydet.il);
 
     const bugun = new Date();
     const dun = new Date(bugun.getFullYear(), bugun.getMonth(), bugun.getDate() - 1);
@@ -390,6 +403,9 @@ app.whenReady().then(async () => {
         kayit.kaydetler.length === 2 && kayit.kaydetler[0].rapor === RAPOR
         && kayit.kaydetler[1].rapor === IKINCI,
         kayit.kaydetler.map((k) => k.rapor).join(' | '));
+      kontrol('il kodu her iki raporda da Tümü seçildi',
+        kayit.kaydetler.every((k) => k.il === 'Tümü'),
+        kayit.kaydetler.map((k) => k.il).join(' | '));
       kontrol('iki dosya da indirildi ve ayrı adla saklandı',
         !!sonuc2.dosyalar && sonuc2.dosyalar.length === 2
         && sonuc2.dosyalar.every((d) => d.dosya && fs.existsSync(d.dosya))

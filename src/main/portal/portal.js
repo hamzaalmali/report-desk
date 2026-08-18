@@ -13,6 +13,7 @@ const ALAN = {
   onayKodu: 'txtOnayKoduGiris',
   onay: 'btnOnay',
   rapor: 'ctl00_ContentPlaceHolder1_cmbRaporlar',
+  ilKodu: 'ctl00_ContentPlaceHolder1_cmbILKODU',
   basTarih: 'ctl00_ContentPlaceHolder1_dateTimeBASTARIH',
   sonTarih: 'ctl00_ContentPlaceHolder1_dateTimeSONTARIH',
   saat: 'ctl00_ContentPlaceHolder1_cmbSAAT',
@@ -25,6 +26,7 @@ const ALAN = {
 const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 
 const BOLME = 'persist:portal';
+const IL_KODU_DEGERI = 'Tümü';
 const VARSAYILAN_SAYFA_SN = 180;
 const OGE_SURESI = 30000;
 const INDIRME_SURESI = 180000;
@@ -137,25 +139,29 @@ const YARDIM = `
   };
   rd.altMenuAc = function (altYol, menuYol) {
     var m = rd.menuOge(menuYol);
-    var baglar = m ? [].slice.call(m.querySelectorAll('ul a')).filter(function (b) {
-      return rd.gorunur(b);
-    }) : [];
-    for (var i = 0; i < baglar.length; i++) {
-      if (rd.buyuk(rd.metin(baglar[i], 40)) === 'RAPORLAR') {
-        rd.tikla(baglar[i]);
-        return { metin: rd.metin(baglar[i], 40), yol: 'metin' };
+    var hepsi = m ? [].slice.call(m.querySelectorAll('ul a')) : [];
+    var gorunenler = hepsi.filter(function (b) { return rd.gorunur(b); });
+    var adaUyan = function (liste) {
+      for (var i = 0; i < liste.length; i++) {
+        if (rd.buyuk(rd.metin(liste[i], 40)) === 'RAPORLAR') return liste[i];
       }
+      return null;
+    };
+    var hedef = adaUyan(gorunenler);
+    var yol = 'metin';
+    if (!hedef) {
+      hedef = adaUyan(hepsi);
+      if (hedef) yol = 'metin-gizli';
     }
-    var x = rd.xp(altYol);
-    if (x && rd.gorunur(x)) {
-      rd.tikla(x);
-      return { metin: rd.metin(x, 40) || 'tıklandı', yol: 'xpath' };
+    if (!hedef) {
+      var x = rd.xp(altYol);
+      if (x) { hedef = x; yol = 'xpath'; }
     }
-    if (baglar.length) {
-      rd.tikla(baglar[0]);
-      return { metin: rd.metin(baglar[0], 40) || 'tıklandı', yol: 'ilk' };
-    }
-    return null;
+    if (!hedef && gorunenler.length) { hedef = gorunenler[0]; yol = 'ilk'; }
+    if (!hedef && hepsi.length) { hedef = hepsi[0]; yol = 'ilk-gizli'; }
+    if (!hedef) return null;
+    rd.tikla(hedef);
+    return { metin: rd.metin(hedef, 40) || 'tıklandı', yol: yol };
   };
   rd.etkin = function (e) {
     if (!e || e.disabled) return false;
@@ -695,6 +701,11 @@ async function calistir(istek) {
     const etiket = raporlar.length > 1 ? ` (${ri + 1}/${raporlar.length})` : '';
 
     await adim('raporlar-menu' + ek, 'Raporlar menüsü açılıyor' + etiket, async () => {
+      if (ri > 0) {
+        aktifCerceve = null;
+        await pencere.loadURL(ayarlar.anaUrl || ayarlar.girisUrl);
+        await sakinlesme();
+      }
       try {
         await cerceveSec(`!!window.__rd.menuOge(${JSON.stringify(ayarlar.menuXpath)})`,
           'menü', sayfaMs);
@@ -747,7 +758,26 @@ async function calistir(istek) {
       return { yontem, deger };
     });
 
-    await adim('tarihler' + ek, 'Tarih ve saat yazılıyor' + etiket, async () => {
+    await adim('tarihler' + ek, 'Form dolduruluyor' + etiket, async () => {
+      let ilKodu = null;
+      if (await dene(`!!window.__rd.bul(${JSON.stringify(ALAN.ilKodu + '_Input')})`)) {
+        await js(`window.__rd.comboAc(${JSON.stringify(ALAN.ilKodu)})`);
+        await uyu(700);
+        let ilYontem = await dene(
+          `window.__rd.comboSec(${JSON.stringify(ALAN.ilKodu)}, ${JSON.stringify(IL_KODU_DEGERI)})`
+        ) ? 'liste' : null;
+        if (!ilYontem) {
+          ilYontem = await dene(
+            `window.__rd.comboApi(${JSON.stringify(ALAN.ilKodu)}, ${JSON.stringify(IL_KODU_DEGERI)})`
+          );
+        }
+        await uyu(800);
+        await sakinlesme();
+        const ilDeger = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.ilKodu)})`);
+        ilKodu = { yontem: ilYontem, deger: ilDeger };
+        if (!ilYontem) log(`Portal: il kodu "${IL_KODU_DEGERI}" seçilemedi, kutuda "${ilDeger || ''}" var.`);
+      }
+
       const bas = await js(
         `window.__rd.tarih(${JSON.stringify(ALAN.basTarih)}, ${JSON.stringify(aralik.bas.metin)},`
         + ` ${aralik.bas.gun}, ${aralik.bas.ay}, ${aralik.bas.yil})`
@@ -773,7 +803,10 @@ async function calistir(istek) {
       const saat = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.saat)})`);
 
       if (!bas || !son) throw new Error('Tarih kutuları bulunamadı.');
-      return { bas, son, saat, saatYontem, istenenBas: aralik.bas.metin, istenenSon: aralik.son.metin };
+      return {
+        bas, son, saat, saatYontem, ilKodu,
+        istenenBas: aralik.bas.metin, istenenSon: aralik.son.metin,
+      };
     });
 
     await adim('rapor-kaydet' + ek, 'Rapor kuyruğa gönderiliyor' + etiket, async () => {
