@@ -734,8 +734,13 @@ async function main() {
 
     const v = portalAyar.oku(db);
     kontrol('portal ayarları varsayılanla geliyor',
-      v.saat === '01:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === '',
+      v.saat === '01:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === ''
+      && v.sayfaSn === 180,
       JSON.stringify(v));
+    kontrol('sayfa beklemesi alt sınırın altına inmiyor',
+      portalAyar.yaz(db, { sayfaSn: 3 }).sayfaSn === 15
+      && portalAyar.yaz(db, { sayfaSn: 240 }).sayfaSn === 240
+      && portalAyar.yaz(db, { sayfaSn: '' }).sayfaSn === 180);
     kontrol('eksik ayar bildiriliyor', portalAyar.dogrula(v).length === 2);
     kontrol('tablo ayarı eksikleri ayrıca bildiriliyor',
       portalAyar.dogrulaTablo(v).length === 3

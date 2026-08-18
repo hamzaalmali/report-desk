@@ -1897,6 +1897,7 @@ function portalKarti(ayar, hesaplar) {
         ${alan('pOnaySn', 'Onay kodu bekleme (saniye)', ayar.onaySn, 'number', '180')}
         ${alan('pYenilemeSn', 'Kuyruk yenileme aralığı (saniye)', ayar.yenilemeSn, 'number', '120')}
         ${alan('pBeklemeDk', 'Rapor için azami bekleme (dakika)', ayar.beklemeDk, 'number', '60')}
+        ${alan('pSayfaSn', 'Sayfa yüklenmesi için azami bekleme (saniye)', ayar.sayfaSn, 'number', '180')}
         <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
           <input type="checkbox" id="pGorunur" class="size-4 accent-[#3ecf8e]"
                  ${ayar.gorunur ? 'checked' : ''} /> Tarayıcı penceresi görünsün
@@ -2113,6 +2114,7 @@ function portalBagla(ayar) {
         onaySn: el('pOnaySn').value,
         yenilemeSn: el('pYenilemeSn').value,
         beklemeDk: el('pBeklemeDk').value,
+        sayfaSn: el('pSayfaSn').value,
         gorunur: el('pGorunur').checked,
         kapat: el('pKapat').checked,
         menuXpath: el('pMenu').value,

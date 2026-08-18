@@ -22,6 +22,7 @@ const ALANLAR = [
     varsayilan: '//*[@id="leftsidenav"]/li[6]/ul/li[1]/a',
   },
   { anahtar: 'portalGunGeri', ad: 'gunGeri', tur: 'sayi', varsayilan: 1 },
+  { anahtar: 'portalSayfaSn', ad: 'sayfaSn', tur: 'sayi', varsayilan: 180, enAz: 15 },
   { anahtar: 'portalYenilemeSn', ad: 'yenilemeSn', tur: 'sayi', varsayilan: 120, enAz: 5 },
   { anahtar: 'portalBeklemeDk', ad: 'beklemeDk', tur: 'sayi', varsayilan: 60, enAz: 1 },
   { anahtar: 'portalOnaySn', ad: 'onaySn', tur: 'sayi', varsayilan: 180 },

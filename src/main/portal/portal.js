@@ -25,7 +25,7 @@ const ALAN = {
 const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 
 const BOLME = 'persist:portal';
-const SAYFA_SURESI = 60000;
+const VARSAYILAN_SAYFA_SN = 180;
 const OGE_SURESI = 30000;
 const INDIRME_SURESI = 180000;
 const EN_KISA_YENILEME = 5;
@@ -386,6 +386,7 @@ async function calistir(istek) {
     .map((r) => String(r == null ? '' : r).trim())
     .filter(Boolean);
   if (!raporlar.length) throw new Error('Rapor adı Ayarlar\'da tanımlı değil.');
+  const sayfaMs = Math.max(15, Number(ayarlar.sayfaSn) || VARSAYILAN_SAYFA_SN) * 1000;
   if (!hesap || !hesap.kullanici || !hesap.sifre) {
     throw new Error('Bu numara için kullanıcı adı ve şifre tanımlı değil.');
   }
@@ -509,7 +510,7 @@ async function calistir(istek) {
     throw new Error(`Beklenen aşamaya ulaşılamadı: ${aciklama}`);
   };
 
-  const sakinlesme = async (sure = 20000) => {
+  const sakinlesme = async (sure = sayfaMs) => {
     const bitis = Date.now() + sure;
     await uyu(400);
     while (Date.now() < bitis) {
@@ -596,7 +597,7 @@ async function calistir(istek) {
     + ' return !!(o && window.__rd.gorunur(o)); })()';
   const GIRIS_VAR = `!!window.__rd.bul(${JSON.stringify(ALAN.giris)})`;
 
-  const girisiBekle = async (sure = 45000) => {
+  const girisiBekle = async (sure = Math.max(45000, sayfaMs)) => {
     const bitis = Date.now() + sure;
     while (Date.now() < bitis) {
       kontrol();
@@ -626,7 +627,7 @@ async function calistir(istek) {
       await pencere.loadURL(ayarlar.girisUrl);
       await sakinlesme();
       await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kullanici)})`,
-        'kullanıcı adı kutusu', SAYFA_SURESI);
+        'kullanıcı adı kutusu', sayfaMs);
       return { url: pencere.webContents.getURL() };
     });
 
@@ -638,7 +639,7 @@ async function calistir(istek) {
       await uyu(200);
       await js(`window.__rd.tikla(window.__rd.bul(${JSON.stringify(ALAN.giris)}))`);
       await uyu(1500);
-      await sakinlesme(30000);
+      await sakinlesme();
       aktifCerceve = null;
       girisSonucu = await girisiBekle();
       return { sonuc: girisSonucu, url: pencere.webContents.getURL() };
@@ -656,7 +657,7 @@ async function calistir(istek) {
           await uyu(200);
           await js(`window.__rd.tikla(window.__rd.bul(${JSON.stringify(ALAN.onay)}))`);
           await uyu(1500);
-          await sakinlesme(30000);
+          await sakinlesme();
           const halaVar = await dene(
             `(function () { var o = window.__rd.bul(${JSON.stringify(ALAN.onayKodu)});`
             + ' return !!(o && window.__rd.gorunur(o)); })()'
@@ -696,7 +697,7 @@ async function calistir(istek) {
     await adim('raporlar-menu' + ek, 'Raporlar menüsü açılıyor' + etiket, async () => {
       try {
         await cerceveSec(`!!window.__rd.menuOge(${JSON.stringify(ayarlar.menuXpath)})`,
-          'menü', 20000);
+          'menü', sayfaMs);
       } catch {
         throw new Error('Raporlar menüsü bulunamadı — menüde adı "Rapor" ile başlayan '
           + 'bir başlık yok ve Ayarlar\'daki menü yolu da tutmuyor. '
@@ -713,13 +714,13 @@ async function calistir(istek) {
       const alt = await bekle(
         `window.__rd.altMenuAc(${JSON.stringify(ayarlar.altMenuXpath)},`
         + ` ${JSON.stringify(ayarlar.menuXpath)})`,
-        'Raporlar alt menüsü açılmadı — alt menü yolu (XPath) tutmuyor olabilir', 15000
+        'Raporlar alt menüsü açılmadı — alt menü yolu (XPath) tutmuyor olabilir', sayfaMs
       );
 
       await uyu(1500);
       const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.rapor + '_Input')})`,
-        'rapor seçim kutusu — sayfa açılmadı ya da alan adı değişmiş', SAYFA_SURESI);
-      await sakinlesme(30000);
+        'rapor seçim kutusu — sayfa açılmadı ya da alan adı değişmiş', sayfaMs);
+      await sakinlesme();
       return { menu, alt, url: c.url || pencere.webContents.getURL() };
     });
 
@@ -735,7 +736,7 @@ async function calistir(istek) {
         );
       }
       await uyu(1200);
-      await sakinlesme(30000);
+      await sakinlesme();
       const deger = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.rapor)})`);
       if (!deger) throw new Error('Rapor seçilemedi.');
       const secenekler = await dene(`window.__rd.comboListe(${JSON.stringify(ALAN.rapor)}).slice(0, 60)`);
@@ -768,7 +769,7 @@ async function calistir(istek) {
         );
       }
       await uyu(800);
-      await sakinlesme(20000);
+      await sakinlesme();
       const saat = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.saat)})`);
 
       if (!bas || !son) throw new Error('Tarih kutuları bulunamadı.');
@@ -777,7 +778,7 @@ async function calistir(istek) {
 
     await adim('rapor-kaydet' + ek, 'Rapor kuyruğa gönderiliyor' + etiket, async () => {
       const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kaydet)})`,
-        'Raporu kaydet düğmesi bulunamadı — sayfa ya da düğme adı değişmiş olabilir', 20000);
+        'Raporu kaydet düğmesi bulunamadı — sayfa ya da düğme adı değişmiş olabilir', sayfaMs);
       const yontem = await jsC(c, `window.__rd.dugme(${JSON.stringify(ALAN.kaydet)})`);
       if (yontem === 'pasif') {
         throw new Error('Raporu kaydet düğmesi pasif — zorunlu bir alan boş kalmış olabilir.');
@@ -785,13 +786,13 @@ async function calistir(istek) {
       if (!yontem) throw new Error('Raporu kaydet düğmesine tıklanamadı.');
 
       await uyu(1500);
-      await sakinlesme(45000);
+      await sakinlesme();
       aktifCerceve = null;
       await cerceveSec(
         `(!!window.__rd.bul(${JSON.stringify(ALAN.yenile)})`
         + ` || !!document.querySelector(${JSON.stringify(KUYRUK_SECICI)})`
         + ' || !!document.querySelector(\'[id*="grdRaporKuyruk"]\'))',
-        'rapor kuyruğu ekranı açılmadı — rapor kuyruğa alınmamış olabilir', SAYFA_SURESI
+        'rapor kuyruğu ekranı açılmadı — rapor kuyruğa alınmamış olabilir', sayfaMs
       );
       return { yontem, url: pencere.webContents.getURL() };
     });
@@ -841,7 +842,7 @@ async function calistir(istek) {
           basarisizYenileme = 0;
         }
         await uyu(1200);
-        await sakinlesme(30000);
+        await sakinlesme();
       }
     });
 
@@ -877,7 +878,7 @@ async function calistir(istek) {
           return { silindi: false, yontem: yontem || null };
         }
         await uyu(1200);
-        await sakinlesme(30000);
+        await sakinlesme();
         const kaldiMi = await dene(`!!window.__rd.bul(${JSON.stringify(hedef)})`);
         if (kaldiMi) log('Portal: silme düğmesine basıldı ama satır kuyrukta duruyor.');
         return { silindi: !kaldiMi, yontem };
