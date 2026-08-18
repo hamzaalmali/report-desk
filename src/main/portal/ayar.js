@@ -6,6 +6,8 @@ const ALANLAR = [
   { anahtar: 'portalGirisUrl', ad: 'girisUrl', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalAnaUrl', ad: 'anaUrl', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalRaporAdi', ad: 'raporAdi', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalTabloRapor1', ad: 'tabloRapor1', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalTabloRapor2', ad: 'tabloRapor2', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalSaat', ad: 'saat', tur: 'metin', varsayilan: '01:00' },
   {
     anahtar: 'portalMenuXpath',
@@ -85,4 +87,12 @@ function dogrula(a) {
   return eksik;
 }
 
-module.exports = { oku, yaz, dogrula, varsayilanAna, ALANLAR, ESKIYEN };
+function dogrulaTablo(a) {
+  const eksik = [];
+  if (!a.girisUrl) eksik.push('giriş adresi');
+  if (!a.tabloRapor1) eksik.push('tablo raporu 1 (kesinti listesi)');
+  if (!a.tabloRapor2) eksik.push('tablo raporu 2 (detay)');
+  return eksik;
+}
+
+module.exports = { oku, yaz, dogrula, dogrulaTablo, varsayilanAna, ALANLAR, ESKIYEN };

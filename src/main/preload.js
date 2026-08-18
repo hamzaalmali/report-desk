@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('api', {
   portalHesapYaz: (gelen) => cagir('portalHesapYaz', gelen),
   portalHesapSil: (id) => cagir('portalHesapSil', id),
   portalCalistir: (numara) => cagir('portalCalistir', numara),
+  tabloCalistir: (numara) => cagir('tabloCalistir', numara),
   portalDurum: () => cagir('portalDurum'),
   portalDurdur: () => cagir('portalDurdur'),
   portalKlasorAc: () => cagir('portalKlasorAc'),

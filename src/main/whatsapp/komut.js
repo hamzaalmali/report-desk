@@ -41,6 +41,14 @@ const KOMUTLAR = [
     servis: 'rapor',
     calistir: (b) => b.servisler.rapor(b),
   },
+  {
+    kod: 'tablo',
+    tam: ['TABLO', 'TABLOGÖNDER', 'TABLOAL', 'TABLOHAZIRLA', 'KESİNTİTABLOSU'],
+    onEk: ['TABLOGÖNDER', 'TABLOHAZIRLA', 'KESİNTİTABLOSU'],
+    ozelSohbet: true,
+    servis: 'tablo',
+    calistir: (b) => b.servisler.tablo(b),
+  },
 ];
 
 function komutBul(metin) {

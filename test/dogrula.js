@@ -561,6 +561,18 @@ async function main() {
     kontrol('hava komutu rapor komutuna karışmıyor',
       komut.komutBul('hava durumu').kod === 'hava');
 
+    kontrol('tablo komutu tanınıyor',
+      ['tablo gönder', 'Tablo Gönder', 'TABLO GÖNDER', 'tablo', 'tablo hazırla', 'kesinti tablosu']
+        .every((m) => (komut.komutBul(m) || {}).kod === 'tablo'),
+      ['tablo gönder', 'tablo', 'kesinti tablosu']
+        .map((m) => `${m}=${(komut.komutBul(m) || {}).kod}`).join(' '));
+    kontrol('tabloya benzeyen metin komut sayılmıyor',
+      ['tablodan bahsettik', 'gönder tablo', 'tablolar']
+        .every((m) => (komut.komutBul(m) || {}).kod !== 'tablo'));
+    kontrol('tablo komutu rapor komutuna karışmıyor',
+      komut.komutBul('rapor gönder').kod === 'rapor'
+      && komut.komutBul('tablo gönder').kod === 'tablo');
+
     let cagrildi = null;
     const raporlu = komut.olustur({
       izinliler: () => '',
@@ -587,6 +599,133 @@ async function main() {
       && komut.numaraDuzelt('') === '');
   }
 
+  console.log('\nKesinti tablosu');
+  {
+    const ExcelJS = require('exceljs');
+    const tablo = require('../src/main/tablo/kesintiTablosu');
+
+    kontrol('sayı çözümü Türkçe biçimleri anlıyor',
+      tablo.sayi('0,321') === 0.321 && tablo.sayi('1.250') === 1250
+      && tablo.sayi('1.506,115') === 1506.115 && tablo.sayi(10.4) === 10.4
+      && tablo.sayi('') === null && tablo.sayi('abc') === null,
+      [tablo.sayi('0,321'), tablo.sayi('1.250'), tablo.sayi('1.506,115')].join(' | '));
+    kontrol('yazım farkları aynı anahtara iniyor',
+      tablo.duz('Dagitim Transformatörü') === tablo.duz('Dağıtım Transformatörü')
+      && tablo.duz('AG ABONE KABLOSU') === tablo.duz('ag abone kablosu'));
+
+    const klasor = fs.mkdtempSync(path.join(os.tmpdir(), 'kesinti-tablo-'));
+    const anaYol = path.join(klasor, 'liste.xlsx');
+    const detayYol = path.join(klasor, 'detay.xlsx');
+
+    const yazDosya = async (yol, sayfaAdi, basliklar, satirlar) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(sayfaAdi);
+      ws.addRow(basliklar);
+      for (const s of satirlar) ws.addRow(s);
+      await wb.xlsx.writeFile(yol);
+    };
+
+    await yazDosya(anaYol, 'AnaListe', [
+      'KESİNTİNİN KODU (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)',
+      'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)',
+    ], [
+      [5001, 1, 'BURSA', 'KESTEL', 'OG HAT BAKIM', 10.4],
+      [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5'],
+      [5003, 1, 'YALOVA', 'MERKEZ', 'KUŞ ÇARPMASI', 6],
+      [5004, 1, 'BURSA', 'NİLÜFER', 'SCADA-MANEVRA', '2,5'],
+    ]);
+
+    await yazDosya(detayYol, 'Detay', [
+      'KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)', 'KAYNAK TÜRÜ',
+      'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'TOPLAM ABONE', 'TABLET AÇIKLAMA',
+    ], [
+      [5001, 1, 'BURSA', 'KESTEL', 'KÖK', 'OG HAT BAKIM', 1500, 'not-1'],
+      [5001, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'OG HAT BAKIM', 200, 'not-1b'],
+      [5002, 1, 'BURSA', 'GÜRSU', 'Dagitim Transformatörü', 'AG ABONE KABLOSU', '1.250', 'kablo notu'],
+      [5003, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'KUŞ ÇARPMASI', 1000, ''],
+      [5004, 1, 'BURSA', 'NİLÜFER', 'Dagitim Merkezi', 'SCADA-MANEVRA', 40, 'osos notu'],
+      [5005, 1, 'BURSA', 'İNEGÖL', 'Dağıtım Transformatörü', 'AG ABONE KABLOSU', 10, ''],
+    ]);
+
+    const sonuc = await tablo.olustur({
+      anaDosya: anaYol, detayDosya: detayYol,
+      hedefKlasor: klasor, tarihMetni: '16.08.2026',
+    });
+
+    kontrol('çıktı dosyası tarihli adla yazıldı',
+      sonuc.ad === '16.08.2026 Tarihinde Gerçekleşmiş Olan Kesinti Detayları.xlsx'
+      && fs.existsSync(sonuc.dosya), sonuc.ad);
+    kontrol('özet sayıları doğru',
+      sonuc.ozet.toplam === 4 && sonuc.ozet.altiSaat === 2 && sonuc.ozet.binAbone === 3
+      && sonuc.ozet.ikiIlce === 1 && sonuc.ozet.rekortman === 2,
+      JSON.stringify(sonuc.ozet));
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(sonuc.dosya);
+    const adlar = wb.worksheets.map((w) => w.name);
+    kontrol('sayfalar doğru sırada',
+      adlar.join('|') === 'AnaListe|6 Saat ve Üzeri Kesintiler|2 ve Üzeri Etkilenen İlçeler'
+      + '|Rekortman|1000 ve Üzeri Etkilenen Abone|ARIZA DETAY', adlar.join('|'));
+
+    const oku = (ad) => {
+      const ws = wb.getWorksheet(ad);
+      const satirlar = [];
+      ws.eachRow((row, r) => {
+        if (r === 1) return;
+        satirlar.push([1, 2, 3, 4, 5, 6, 7, 8].map((c) => row.getCell(c).value));
+      });
+      return { ws, satirlar };
+    };
+
+    const ana = oku('AnaListe');
+    const anaBaslik = [1, 2, 3, 4, 5, 6, 7, 8].map((c) => ana.ws.getRow(1).getCell(c).value);
+    kontrol('ana listeye abone ve tablet sütunları eklendi',
+      anaBaslik[6] === 'TOPLAM ABONE' && anaBaslik[7] === 'TABLET AÇIKLAMASI',
+      anaBaslik.join(' | '));
+    kontrol('abone ve tablet detaydan koda göre çekildi',
+      ana.satirlar.length === 4
+      && ana.satirlar[0][6] === 1500 && ana.satirlar[0][7] === 'not-1'
+      && ana.satirlar[1][6] === 1250 && ana.satirlar[1][7] === 'kablo notu'
+      && ana.satirlar[2][6] === 1000 && ana.satirlar[3][6] === 40,
+      ana.satirlar.map((s) => `${s[0]}:${s[6]}`).join(' '));
+
+    const alti = oku('6 Saat ve Üzeri Kesintiler');
+    kontrol('6 saat ve üzeri sayfası sınırı dahil süzüyor',
+      alti.satirlar.map((s) => s[0]).join(',') === '5001,5003',
+      alti.satirlar.map((s) => s[0]).join(','));
+
+    const bin = oku('1000 ve Üzeri Etkilenen Abone');
+    kontrol('1000 ve üzeri abone sayfası sınırı dahil süzüyor',
+      bin.satirlar.map((s) => s[0]).join(',') === '5001,5002,5003',
+      bin.satirlar.map((s) => s[0]).join(','));
+
+    const iki = oku('2 ve Üzeri Etkilenen İlçeler');
+    kontrol('iki ve üzeri ilçe sayfası aynı kodun tüm satırlarını alıyor',
+      iki.satirlar.length === 2 && iki.satirlar.every((s) => s[0] === 5001)
+      && iki.satirlar[0][3] === 'KESTEL' && iki.satirlar[1][3] === 'MERKEZ',
+      iki.satirlar.map((s) => `${s[0]}:${s[3]}`).join(' '));
+    const vurgulu = iki.ws.getRow(2).getCell(1);
+    kontrol('yinelenen kod hücresi kırmızı vurgulu',
+      !!(vurgulu.fill && vurgulu.fill.fgColor && vurgulu.fill.fgColor.argb === 'FFFFC7CE'),
+      JSON.stringify(vurgulu.fill || null));
+
+    const rek = oku('Rekortman');
+    kontrol('rekortman süzgeci yazım farkına rağmen çalışıyor',
+      rek.satirlar.map((s) => s[0]).join(',') === '5002,5005',
+      rek.satirlar.map((s) => s[0]).join(','));
+
+    const ariza = oku('ARIZA DETAY');
+    kontrol('arıza detay aboneye göre azalan sıralı',
+      ariza.satirlar.map((s) => s[0]).join(',') === '5001,5002,5003,5004',
+      ariza.satirlar.map((s) => `${s[0]}:${s[6]}`).join(' '));
+
+    const dolu = ana.ws.getRow(1);
+    kontrol('başlık satırı kalın ve süzgeçli',
+      dolu.getCell(1).font && dolu.getCell(1).font.bold === true && !!ana.ws.autoFilter);
+
+    fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
   console.log('\nPortal hesapları ve ayarları');
   {
     const portalAyar = require('../src/main/portal/ayar');
@@ -598,6 +737,10 @@ async function main() {
       v.saat === '01:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === '',
       JSON.stringify(v));
     kontrol('eksik ayar bildiriliyor', portalAyar.dogrula(v).length === 2);
+    kontrol('tablo ayarı eksikleri ayrıca bildiriliyor',
+      portalAyar.dogrulaTablo(v).length === 3
+      && portalAyar.dogrulaTablo({ girisUrl: 'x', tabloRapor1: 'A', tabloRapor2: 'B' }).length === 0,
+      portalAyar.dogrulaTablo(v).join(', '));
 
     const y = portalAyar.yaz(db, {
       girisUrl: 'https://ornek.test/Login.aspx', raporAdi: 'Bir Rapor',

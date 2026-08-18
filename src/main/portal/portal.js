@@ -341,20 +341,33 @@ function iptal() {
 }
 
 function indirmeyiIzle(oturum, klasor) {
-  let coz = null;
-  let red = null;
-  const sozu = new Promise((c, r) => { coz = c; red = r; });
+  const bekleyenler = [];
+  const hazirlar = [];
+  const dagit = (sonuc) => {
+    const b = bekleyenler.shift();
+    if (b) (sonuc.hata ? b.red(sonuc.hata) : b.coz(sonuc.deger));
+    else hazirlar.push(sonuc);
+  };
   const dinleyici = (_olay, oge) => {
-    const ad = oge.getFilename();
+    let ad = oge.getFilename();
+    if (fs.existsSync(path.join(klasor, ad))) ad = `${Date.now() % 100000}-${ad}`;
     const hedef = path.join(klasor, ad);
     try { oge.setSavePath(hedef); } catch { }
     oge.once('done', (_o, durum) => {
-      if (durum === 'completed') coz({ dosya: hedef, ad, boyut: oge.getReceivedBytes() });
-      else red(new Error(`İndirme tamamlanmadı (${durum}).`));
+      dagit(durum === 'completed'
+        ? { deger: { dosya: hedef, ad, boyut: oge.getReceivedBytes() } }
+        : { hata: new Error(`İndirme tamamlanmadı (${durum}).`) });
     });
   };
   oturum.on('will-download', dinleyici);
-  return { sozu, birak: () => { try { oturum.removeListener('will-download', dinleyici); } catch { } } };
+  return {
+    sonraki() {
+      const h = hazirlar.shift();
+      if (h) return h.hata ? Promise.reject(h.hata) : Promise.resolve(h.deger);
+      return new Promise((coz, red) => bekleyenler.push({ coz, red }));
+    },
+    birak: () => { try { oturum.removeListener('will-download', dinleyici); } catch { } },
+  };
 }
 
 async function calistir(istek) {
@@ -368,7 +381,11 @@ async function calistir(istek) {
   } = istek;
 
   if (!ayarlar.girisUrl) throw new Error('Portal giriş adresi Ayarlar\'da tanımlı değil.');
-  if (!ayarlar.raporAdi) throw new Error('Rapor adı Ayarlar\'da tanımlı değil.');
+  const raporlar = (istek.raporlar && istek.raporlar.length
+    ? istek.raporlar : [ayarlar.raporAdi])
+    .map((r) => String(r == null ? '' : r).trim())
+    .filter(Boolean);
+  if (!raporlar.length) throw new Error('Rapor adı Ayarlar\'da tanımlı değil.');
   if (!hesap || !hesap.kullanici || !hesap.sifre) {
     throw new Error('Bu numara için kullanıcı adı ve şifre tanımlı değil.');
   }
@@ -669,7 +686,14 @@ async function calistir(istek) {
       return 'menü okunamadı';
     };
 
-    await adim('raporlar-menu', 'Raporlar menüsü açılıyor', async () => {
+    const dosyalar = [];
+
+    for (let ri = 0; ri < raporlar.length; ri++) {
+    const raporAdi = raporlar[ri];
+    const ek = ri === 0 ? '' : `-r${ri + 1}`;
+    const etiket = raporlar.length > 1 ? ` (${ri + 1}/${raporlar.length})` : '';
+
+    await adim('raporlar-menu' + ek, 'Raporlar menüsü açılıyor' + etiket, async () => {
       try {
         await cerceveSec(`!!window.__rd.menuOge(${JSON.stringify(ayarlar.menuXpath)})`,
           'menü', 20000);
@@ -699,15 +723,15 @@ async function calistir(istek) {
       return { menu, alt, url: c.url || pencere.webContents.getURL() };
     });
 
-    await adim('rapor-secimi', `Rapor seçiliyor: ${ayarlar.raporAdi}`, async () => {
+    await adim('rapor-secimi' + ek, `Rapor seçiliyor: ${raporAdi}`, async () => {
       await js(`window.__rd.comboAc(${JSON.stringify(ALAN.rapor)})`);
       await uyu(900);
       let yontem = await dene(
-        `window.__rd.comboSec(${JSON.stringify(ALAN.rapor)}, ${JSON.stringify(ayarlar.raporAdi)})`
+        `window.__rd.comboSec(${JSON.stringify(ALAN.rapor)}, ${JSON.stringify(raporAdi)})`
       ) ? 'liste' : null;
       if (!yontem) {
         yontem = await dene(
-          `window.__rd.comboApi(${JSON.stringify(ALAN.rapor)}, ${JSON.stringify(ayarlar.raporAdi)})`
+          `window.__rd.comboApi(${JSON.stringify(ALAN.rapor)}, ${JSON.stringify(raporAdi)})`
         );
       }
       await uyu(1200);
@@ -715,14 +739,14 @@ async function calistir(istek) {
       const deger = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.rapor)})`);
       if (!deger) throw new Error('Rapor seçilemedi.');
       const secenekler = await dene(`window.__rd.comboListe(${JSON.stringify(ALAN.rapor)}).slice(0, 60)`);
-      if (String(deger).trim() !== String(ayarlar.raporAdi).trim()) {
+      if (String(deger).trim() !== String(raporAdi).trim()) {
         throw new Error(`Rapor adı kutuya yerleşmedi (kutuda "${deger}" yazıyor). `
           + `Listedekiler: ${(secenekler || []).join(' | ') || 'okunamadı'}`);
       }
       return { yontem, deger };
     });
 
-    await adim('tarihler', 'Tarih ve saat yazılıyor', async () => {
+    await adim('tarihler' + ek, 'Tarih ve saat yazılıyor' + etiket, async () => {
       const bas = await js(
         `window.__rd.tarih(${JSON.stringify(ALAN.basTarih)}, ${JSON.stringify(aralik.bas.metin)},`
         + ` ${aralik.bas.gun}, ${aralik.bas.ay}, ${aralik.bas.yil})`
@@ -751,7 +775,7 @@ async function calistir(istek) {
       return { bas, son, saat, saatYontem, istenenBas: aralik.bas.metin, istenenSon: aralik.son.metin };
     });
 
-    await adim('rapor-kaydet', 'Rapor kuyruğa gönderiliyor', async () => {
+    await adim('rapor-kaydet' + ek, 'Rapor kuyruğa gönderiliyor' + etiket, async () => {
       const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kaydet)})`,
         'Raporu kaydet düğmesi bulunamadı — sayfa ya da düğme adı değişmiş olabilir', 20000);
       const yontem = await jsC(c, `window.__rd.dugme(${JSON.stringify(ALAN.kaydet)})`);
@@ -775,7 +799,7 @@ async function calistir(istek) {
     const KUYRUK = `window.__rd.kuyruk(${JSON.stringify(ALAN.indir)},`
       + ` ${JSON.stringify(KUYRUK_SECICI)})`;
 
-    const kuyruk = await adim('kuyruk', 'Raporun hazırlanması bekleniyor', async (bilgi) => {
+    const kuyruk = await adim('kuyruk' + ek, 'Raporun hazırlanması bekleniyor' + etiket, async (bilgi) => {
       const araMs = Math.max(EN_KISA_YENILEME, Number(ayarlar.yenilemeSn) || 120) * 1000;
       const sinirDk = Math.max(1, Number(ayarlar.beklemeDk) || 60);
       const bitis = Date.now() + sinirDk * 60000;
@@ -821,27 +845,29 @@ async function calistir(istek) {
       }
     });
 
-    const sonuc = await adim('indir', 'Rapor indiriliyor', async () => {
+    const sonuc = await adim('indir' + ek, 'Rapor indiriliyor' + etiket, async () => {
       const hedef = (kuyruk && kuyruk.id) || ALAN.indir;
       const yontem = await js(`window.__rd.dugme(${JSON.stringify(hedef)})`);
       if (!yontem || yontem === 'pasif') {
         throw new Error('İndirme düğmesine tıklanamadı — rapor kuyruğu değişmiş olabilir.');
       }
+      const sozu = indirme.sonraki();
       const zamanAsimi = new Promise((_c, red) => {
         const sayac = setTimeout(() => red(new Error('İndirme süresi doldu.')), INDIRME_SURESI);
-        indirme.sozu.then(() => clearTimeout(sayac), () => clearTimeout(sayac));
+        sozu.then(() => clearTimeout(sayac), () => clearTimeout(sayac));
       });
-      return Promise.race([indirme.sozu, zamanAsimi]);
+      return Promise.race([sozu, zamanAsimi]);
     });
 
     let gonderim = null;
     if (typeof dosyaHazir === 'function' && sonuc && sonuc.dosya) {
-      gonderim = await adim('gonderim', 'Rapor gönderiliyor', async () => dosyaHazir(sonuc));
+      gonderim = await adim('gonderim' + ek, 'Rapor gönderiliyor' + etiket,
+        async () => dosyaHazir({ ...sonuc, rapor: raporAdi, sira: ri }));
     }
 
     let silme = null;
     if (sonuc && sonuc.dosya && (!gonderim || gonderim.ok !== false)) {
-      silme = await adim('kuyruk-sil', 'Rapor kuyruktan siliniyor', async () => {
+      silme = await adim('kuyruk-sil' + ek, 'Rapor kuyruktan siliniyor' + etiket, async () => {
         const hedef = kuyruk && kuyruk.id
           ? String(kuyruk.id).replace('btnRaporIndir', 'btnRaporSil')
           : ALAN.sil;
@@ -858,17 +884,30 @@ async function calistir(istek) {
       });
     }
 
-    const ozet = {
-      klasor,
+    dosyalar.push({
+      rapor: raporAdi,
       dosya: sonuc ? sonuc.dosya : null,
-      dosyaAdi: sonuc ? sonuc.ad : null,
+      ad: sonuc ? sonuc.ad : null,
       boyut: sonuc ? sonuc.boyut : null,
-      adimlar,
       kuyruk: kuyruk
         ? { yenileme: kuyruk.yenileme, satir: kuyruk.satir, hemenHazir: !!kuyruk.hemenHazir }
         : null,
       gonderim,
       silme,
+    });
+    }
+
+    const ilkDosya = dosyalar[0] || {};
+    const ozet = {
+      klasor,
+      dosya: ilkDosya.dosya || null,
+      dosyaAdi: ilkDosya.ad || null,
+      boyut: ilkDosya.boyut || null,
+      dosyalar,
+      adimlar,
+      kuyruk: ilkDosya.kuyruk || null,
+      gonderim: ilkDosya.gonderim || null,
+      silme: ilkDosya.silme || null,
       aralik: { bas: aralik.bas.metin, son: aralik.son.metin, saat: ayarlar.saat },
     };
     fs.writeFileSync(path.join(klasor, 'ozet.json'), JSON.stringify(ozet, null, 2), 'utf8');

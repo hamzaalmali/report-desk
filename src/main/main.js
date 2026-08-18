@@ -18,6 +18,7 @@ const kilit = require('./kilit');
 const ortak = require('./ortak');
 const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
+const kesintiTablosu = require('./tablo/kesintiTablosu');
 const kasa = require('./portal/kasa');
 const sahiplik = require('./whatsapp/sahiplik');
 const senkron = require('./senkron/senkron');
@@ -424,7 +425,7 @@ function waKur() {
       izinliler: () => izinliNumaralar(),
       log: kayit,
       ekIzin: (numara) => portalHesabiVar(numara),
-      servisler: { rapor: (b) => waRaporKomutu(b) },
+      servisler: { rapor: (b) => waRaporKomutu(b), tablo: (b) => waTabloKomutu(b) },
     }),
     kayit
   );
@@ -494,15 +495,18 @@ function hesabiHazirla(numara) {
   return { numara: kayit.numara, ad: kayit.ad, kullanici: kayit.kullanici, sifre };
 }
 
-async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme }) {
+async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme, raporlar }) {
   const ayarlar = portalAyarlari();
-  const eksik = portalAyar.dogrula(ayarlar);
+  const eksik = raporlar && raporlar.length
+    ? (ayarlar.girisUrl ? [] : ['giriş adresi'])
+    : portalAyar.dogrula(ayarlar);
   if (eksik.length) throw new Error(`Portal ayarları eksik: ${eksik.join(', ')}.`);
   const hesap = hesabiHazirla(numara);
 
   return portal.calistir({
     hesap,
     ayarlar,
+    raporlar,
     kokKlasor: PORTAL_KLASORU(),
     onayKodu,
     dosyaHazir,
@@ -582,6 +586,91 @@ async function waRaporKomutu(b) {
   if (sonuc.gonderim && sonuc.gonderim.ok === false) {
     return `Rapor indirildi ama dosya gönderilemedi: ${sonuc.gonderim.hata}\n\n`
       + `Dosya: ${sonuc.dosyaAdi || '-'}\n${bilgi}\nKlasör: ${sonuc.klasor}`;
+  }
+  return null;
+}
+
+async function tabloyuHazirla({ numara, onayKodu, ilerleme }) {
+  const ayarlar = portalAyarlari();
+  const eksik = portalAyar.dogrulaTablo(ayarlar);
+  if (eksik.length) {
+    throw new Error(`Tablo için portal ayarları eksik: ${eksik.join(', ')}. `
+      + 'Ayarlar → Rapor portalı kartına iki rapor adını yazın.');
+  }
+
+  const sonuc = await portaliCalistir({
+    numara,
+    onayKodu,
+    ilerleme,
+    raporlar: [ayarlar.tabloRapor1, ayarlar.tabloRapor2],
+  });
+
+  const [ana, detay] = sonuc.dosyalar || [];
+  if (!ana || !ana.dosya) throw new Error('Kesinti listesi raporu indirilemedi.');
+  if (!detay || !detay.dosya) throw new Error('Detay raporu indirilemedi.');
+
+  const tablo = await kesintiTablosu.olustur({
+    anaDosya: ana.dosya,
+    detayDosya: detay.dosya,
+    hedefKlasor: sonuc.klasor,
+    tarihMetni: sonuc.aralik.bas,
+    log: kayit,
+  });
+  return { sonuc, tablo };
+}
+
+function tabloOzetMetni(tablo) {
+  const o = tablo.ozet;
+  return `Kesinti: ${o.toplam} · 6 saat ve üzeri: ${o.altiSaat} · `
+    + `1000+ abone: ${o.binAbone} · 2+ ilçe: ${o.ikiIlce} · Rekortman: ${o.rekortman}`;
+}
+
+async function waTabloKomutu(b) {
+  if (portal.durumAl().calisiyor) return 'Portal işlemi hâlihazırda çalışıyor, bitince yeniden yazın.';
+
+  const ayarlar = portalAyarlari();
+  const eksik = portalAyar.dogrulaTablo(ayarlar);
+  if (eksik.length) {
+    return `Tablo için portal ayarları eksik: ${eksik.join(', ')}.\n`
+      + 'Ayarlar → Rapor portalı kartına iki rapor adını yazın.';
+  }
+
+  await b.gonder('Portala giriliyor — tablo için iki rapor indirilecek…');
+  const haber = (metin) => { b.gonder(metin).catch(() => { }); };
+
+  let hazir = null;
+  try {
+    hazir = await tabloyuHazirla({
+      numara: b.gonderen,
+      onayKodu: async (deneme, sonHata) => {
+        const soru = (sonHata ? `${sonHata}\n\n` : '')
+          + 'Size gelen onay kodunu yazıp gönderin.'
+          + (deneme > 1 ? ` (${deneme}. deneme)` : '');
+        return b.sor(soru, (ayarlar.onaySn || 180) * 1000);
+      },
+      ilerleme: (o) => {
+        if (o.kod && o.kod.startsWith('rapor-kaydet') && o.durum === 'bitti') {
+          const hangisi = o.kod === 'rapor-kaydet' ? '1. rapor' : '2. rapor';
+          haber(`${hangisi} kuyruğa alındı, hazırlanması bekleniyor `
+            + `(her ${ayarlar.yenilemeSn} saniyede bir bakılacak).`);
+        }
+      },
+    });
+  } finally {
+    wa.soruDusur(b.gonderen);
+  }
+
+  const { sonuc, tablo } = hazir;
+  db.logYaz(null, 'portal', `WhatsApp tablo isteği (${b.gonderen}) → ${tablo.ad}`);
+
+  const baslik = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
+    + tabloOzetMetni(tablo);
+  try {
+    await wa.belgeGonder(b.sohbet, tablo.dosya, tablo.ad, baslik);
+  } catch (e) {
+    kayit(`Tablo dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
+    return `Tablo hazırlandı ama dosya gönderilemedi: ${e.message}\n\n`
+      + `Dosya: ${tablo.ad}\nKlasör: ${sonuc.klasor}`;
   }
   return null;
 }
@@ -1073,6 +1162,12 @@ kanal('portalCalistir', async (numara) => {
   const sonuc = await portaliCalistir({ numara, onayKodu: uiOnayIste });
   db.logYaz(null, 'portal', `Elle çalıştırıldı (${numara}) → ${sonuc.dosyaAdi || 'dosya yok'}`);
   return sonuc;
+});
+
+kanal('tabloCalistir', async (numara) => {
+  const { sonuc, tablo } = await tabloyuHazirla({ numara, onayKodu: uiOnayIste });
+  db.logYaz(null, 'portal', `Tablo elle hazırlandı (${numara}) → ${tablo.ad}`);
+  return { dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet };
 });
 
 kanal('kilitDurum', () => kilit.durumAl(), true);

@@ -1577,6 +1577,11 @@ function waCiz(d) {
             alındıktan sonra hazırlanması beklenir, hazır olunca Excel dosyası aynı
             sohbete gönderilir.
           </div>
+          <div class="text-[12px] text-fg-2">
+            <b>“tablo gönder”</b> aynı kuralla çalışır: Ayarlar'da tanımlı iki raporu
+            (kesinti listesi + detay) peş peşe indirir, günlük kesinti tablosunu tüm
+            sayfalarıyla hazırlayıp hazır Excel'i aynı sohbete gönderir.
+          </div>
           <div class="flex items-end gap-2">
             <label class="flex flex-1 flex-col gap-1">
               <span class="text-[11px] text-fg-3">İzinli numaralar (virgülle, ülke koduyla)</span>
@@ -1872,7 +1877,8 @@ function portalKarti(ayar, hesaplar) {
         <div>
           <div class="font-medium">Rapor portalı</div>
           <div class="text-[11.5px] text-fg-3">
-            Tanımlı numaralardan “rapor gönder” yazılınca portala girilip rapor indirilir</div>
+            Tanımlı numaralardan “rapor gönder” yazılınca portala girilip rapor indirilir;
+            “tablo gönder” ise iki raporu indirip günlük kesinti tablosunu hazırlar</div>
         </div>
         <span class="chip border-line-2 text-fg-3" id="portalRozet">
           ${hesaplar.length} numara</span>
@@ -1883,6 +1889,10 @@ function portalKarti(ayar, hesaplar) {
         ${alan('pAna', 'Ana sayfa adresi', ayar.anaUrl, 'text', 'https://…/default.aspx')}
         ${alan('pRapor', 'Rapor adı (listede yazdığı gibi)', ayar.raporAdi, 'text', '')}
         ${alan('pSaat', 'Saat', ayar.saat, 'text', '01:00')}
+        ${alan('pTabloR1', '“tablo gönder” raporu 1 — kesinti listesi', ayar.tabloRapor1, 'text',
+    'listede yazdığı gibi')}
+        ${alan('pTabloR2', '“tablo gönder” raporu 2 — kesinti detayı', ayar.tabloRapor2, 'text',
+    'listede yazdığı gibi')}
         ${alan('pGunGeri', 'Başlangıç kaç gün geriden', ayar.gunGeri, 'number', '1')}
         ${alan('pOnaySn', 'Onay kodu bekleme (saniye)', ayar.onaySn, 'number', '180')}
         ${alan('pYenilemeSn', 'Kuyruk yenileme aralığı (saniye)', ayar.yenilemeSn, 'number', '120')}
@@ -1931,6 +1941,7 @@ function portalKarti(ayar, hesaplar) {
         <div class="flex flex-wrap items-center gap-2">
           <select id="pKim" class="input" style="min-width:180px"></select>
           <button class="btn btn-brand" id="pCalistir">Şimdi çalıştır</button>
+          <button class="btn" id="pTabloCalistir">Tabloyu şimdi hazırla</button>
           <button class="btn hidden" id="pDurdur">Durdur</button>
           <span class="text-[11.5px] text-fg-3">
             Tarayıcı açılır, adımlar aşağıda görünür; her adımın HTML'i ve ekran görüntüsü kaydedilir.</span>
@@ -2095,6 +2106,8 @@ function portalBagla(ayar) {
         girisUrl: el('pGiris').value,
         anaUrl: el('pAna').value,
         raporAdi: el('pRapor').value,
+        tabloRapor1: el('pTabloR1').value,
+        tabloRapor2: el('pTabloR2').value,
         saat: el('pSaat').value,
         gunGeri: el('pGunGeri').value,
         onaySn: el('pOnaySn').value,
@@ -2130,20 +2143,18 @@ function portalBagla(ayar) {
     try { await cagir(api.portalDurdur()); } catch (e) { bildir(kacar(e.message), 'hata'); }
   };
 
-  el('pCalistir').onclick = async () => {
+  const portalKostur = async (dugmeId, dogrula, calistir) => {
     const numara = el('pKim').value;
     if (!numara) return bildir('Önce kullanıcı adı ve şifresi girilmiş bir numara ekleyin.', 'hata');
-    if (!ayar.girisUrl || !ayar.raporAdi) {
-      return bildir('Önce giriş adresi ve rapor adını kaydedin.', 'hata');
-    }
-    const b = el('pCalistir');
+    const engel = dogrula();
+    if (engel) return bildir(engel, 'hata');
+    const b = el(dugmeId);
     b.disabled = true;
     el('pDurdur').classList.remove('hidden');
     D.portalAdimlar = [];
     portalIlerlemeCiz();
     try {
-      const r = await cagir(api.portalCalistir(numara));
-      bildir(`<b>Rapor indirildi.</b><br>${kacar(r.dosyaAdi || '')}`, 'basari');
+      await calistir(numara);
     } catch (e) {
       bildir(kacar(e.message), 'hata');
     } finally {
@@ -2152,6 +2163,25 @@ function portalBagla(ayar) {
       el('pOnayKutu').classList.add('hidden');
     }
   };
+
+  el('pCalistir').onclick = () => portalKostur('pCalistir',
+    () => (!ayar.girisUrl || !ayar.raporAdi ? 'Önce giriş adresi ve rapor adını kaydedin.' : null),
+    async (numara) => {
+      const r = await cagir(api.portalCalistir(numara));
+      bildir(`<b>Rapor indirildi.</b><br>${kacar(r.dosyaAdi || '')}`, 'basari');
+    });
+
+  el('pTabloCalistir').onclick = () => portalKostur('pTabloCalistir',
+    () => (!ayar.girisUrl || !el('pTabloR1').value.trim() || !el('pTabloR2').value.trim()
+      ? 'Önce giriş adresini ve tablo için iki rapor adını kaydedin.' : null),
+    async (numara) => {
+      const r = await cagir(api.tabloCalistir(numara));
+      const o = r.ozet || {};
+      bildir(`<b>Tablo hazırlandı.</b><br>${kacar(r.dosyaAdi || '')}<br>`
+        + `Kesinti: ${o.toplam ?? '-'} · 6 saat+: ${o.altiSaat ?? '-'} · `
+        + `1000+ abone: ${o.binAbone ?? '-'} · 2+ ilçe: ${o.ikiIlce ?? '-'} · `
+        + `Rekortman: ${o.rekortman ?? '-'}`, 'basari');
+    });
 }
 
 async function sayfaAyarlar() {

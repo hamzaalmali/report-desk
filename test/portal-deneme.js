@@ -118,7 +118,7 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
 
 const HAZIR_YENILEME = 2;
 
-const KUYRUK = (yenileme, silindi) => {
+const KUYRUK = (yenileme, silindi, raporAdi) => {
   const hazir = yenileme >= HAZIR_YENILEME;
   return SAYFA('Rapor Kuyrugu', `
   <h1>Rapor Kuyruğu</h1>
@@ -126,7 +126,7 @@ const KUYRUK = (yenileme, silindi) => {
          type="button" value="Yenile" />
   <table id="ctl00_ContentPlaceHolder1_grdRaporKuyruk"><tbody>
     ${silindi ? '' : `<tr>
-      <td>AYS Kesintiler Form Detay</td>
+      <td>${raporAdi || 'AYS Kesintiler Form Detay'}</td>
       <td>${hazir ? 'Tamamlandı' : 'Hazırlanıyor'}</td>
       <td><input id="ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input"
                  type="button" value="Rapor İndir" ${hazir ? '' : 'disabled'} />
@@ -181,12 +181,15 @@ function sunucuKur(kayit) {
     }
     if (url.pathname === '/kaydet') {
       kayit.kaydet = Object.fromEntries(url.searchParams);
+      kayit.kaydetler = kayit.kaydetler || [];
+      kayit.kaydetler.push(kayit.kaydet);
       kayit.yenileme = 0;
-      return yolla(KUYRUK(0, false));
+      kayit.silindi = false;
+      return yolla(KUYRUK(0, false, kayit.kaydet.rapor));
     }
     if (url.pathname === '/Kuyruk.aspx') {
       kayit.yenileme = (kayit.yenileme || 0) + 1;
-      return yolla(KUYRUK(kayit.yenileme, kayit.silindi));
+      return yolla(KUYRUK(kayit.yenileme, kayit.silindi, kayit.kaydet && kayit.kaydet.rapor));
     }
     if (url.pathname === '/indir') {
       kayit.indirme = { yenileme: kayit.yenileme };
@@ -197,7 +200,7 @@ function sunucuKur(kayit) {
     if (url.pathname === '/sil') {
       kayit.silindi = true;
       kayit.olaylar.push('silme');
-      return yolla(KUYRUK(kayit.yenileme, true));
+      return yolla(KUYRUK(kayit.yenileme, true, kayit.kaydet && kayit.kaydet.rapor));
     }
     if (url.pathname === '/Onay.aspx') return yolla(ONAY);
     if (url.pathname === '/default.aspx') return yolla(ANA);
@@ -208,6 +211,7 @@ function sunucuKur(kayit) {
 }
 
 app.disableHardwareAcceleration();
+app.on('window-all-closed', () => { });
 
 app.whenReady().then(async () => {
   const kayit = { olaylar: [] };
@@ -334,6 +338,83 @@ app.whenReady().then(async () => {
       adimlar.length === 12 && adimlar.every((a) => a.durum === 'bitti'),
       adimlar.map((a) => `${a.kod}:${a.durum}`).join(' '));
     kontrol('iş bitince kilit kalkıyor', portal.durumAl().calisiyor === false);
+  }
+
+  console.log('\nİki raporlu akış (tablo için)');
+  {
+    const IKINCI = 'Üçüncü Rapor';
+    kayit.olaylar = [];
+    kayit.kaydetler = [];
+    kayit.silindi = false;
+    const gonderilenler = [];
+    const adimlar2 = [];
+    let hata2 = null;
+    let sonuc2 = null;
+    try {
+      sonuc2 = await portal.calistir({
+        hesap: { numara: '905551112233', kullanici: KULLANICI, sifre: SIFRE },
+        ayarlar: {
+          girisUrl: `${kok}/Login.aspx`,
+          anaUrl: `${kok}/default.aspx`,
+          raporAdi: '',
+          saat: '01:00',
+          gunGeri: 1,
+          onaySn: 30,
+          yenilemeSn: 5,
+          beklemeDk: 2,
+          gorunur,
+          kapat: true,
+          menuXpath: MENU_XPATH,
+          altMenuXpath: `${MENU_XPATH}/ul/li[1]/a`,
+        },
+        raporlar: [RAPOR, IKINCI],
+        kokKlasor: klasor,
+        onayKodu: async () => KOD,
+        dosyaHazir: async (d) => {
+          kayit.olaylar.push('gonderim');
+          gonderilenler.push({ ad: d.ad, rapor: d.rapor, sira: d.sira });
+          return { ok: true };
+        },
+        ilerleme: (o) => { if (o.durum !== 'calisiyor') adimlar2.push(o); },
+        log: (m) => console.log('    · ' + m),
+      });
+    } catch (e) {
+      hata2 = e;
+    }
+
+    if (hata2) {
+      kontrol('iki raporlu akış hatasız tamamlandı', false, hata2.message);
+    } else {
+      kontrol('iki raporlu akış hatasız tamamlandı', true);
+      kontrol('iki rapor sırayla kuyruğa gönderildi',
+        kayit.kaydetler.length === 2 && kayit.kaydetler[0].rapor === RAPOR
+        && kayit.kaydetler[1].rapor === IKINCI,
+        kayit.kaydetler.map((k) => k.rapor).join(' | '));
+      kontrol('iki dosya da indirildi ve ayrı adla saklandı',
+        !!sonuc2.dosyalar && sonuc2.dosyalar.length === 2
+        && sonuc2.dosyalar.every((d) => d.dosya && fs.existsSync(d.dosya))
+        && sonuc2.dosyalar[0].ad !== sonuc2.dosyalar[1].ad,
+        JSON.stringify((sonuc2.dosyalar || []).map((d) => d.ad)));
+      kontrol('dosyalar rapor adıyla eşleşiyor',
+        sonuc2.dosyalar[0].rapor === RAPOR && sonuc2.dosyalar[1].rapor === IKINCI,
+        sonuc2.dosyalar.map((d) => d.rapor).join(' | '));
+      kontrol('gönderim geri çağrısı her raporu sırasıyla aldı',
+        gonderilenler.length === 2 && gonderilenler[0].rapor === RAPOR
+        && gonderilenler[0].sira === 0 && gonderilenler[1].rapor === IKINCI
+        && gonderilenler[1].sira === 1,
+        JSON.stringify(gonderilenler));
+      kontrol('her rapor gönderildikten sonra kuyruktan silindi',
+        kayit.olaylar.join('>') === 'gonderim>silme>gonderim>silme',
+        kayit.olaylar.join('>'));
+      kontrol('ikinci raporun adımları -r2 ekiyle ayrıldı',
+        adimlar2.some((a) => a.kod === 'rapor-secimi-r2')
+        && adimlar2.some((a) => a.kod === 'kuyruk-sil-r2')
+        && adimlar2.length === 20 && adimlar2.every((a) => a.durum === 'bitti'),
+        adimlar2.map((a) => `${a.kod}:${a.durum}`).join(' '));
+      kontrol('tekil rapor özeti ilk dosyayı gösteriyor',
+        sonuc2.dosya === sonuc2.dosyalar[0].dosya && sonuc2.dosyaAdi === sonuc2.dosyalar[0].ad,
+        sonuc2.dosyaAdi);
+    }
   }
 
   console.log('\nHatada tarayıcı kapanıyor');
