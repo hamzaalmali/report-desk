@@ -26,6 +26,7 @@ const ALANLAR = [
   { anahtar: 'portalYenilemeSn', ad: 'yenilemeSn', tur: 'sayi', varsayilan: 120, enAz: 5 },
   { anahtar: 'portalBeklemeDk', ad: 'beklemeDk', tur: 'sayi', varsayilan: 60, enAz: 1 },
   { anahtar: 'portalOnaySn', ad: 'onaySn', tur: 'sayi', varsayilan: 180 },
+  { anahtar: 'portalKayitDepo', ad: 'kayitDepo', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalGorunur', ad: 'gorunur', tur: 'evet', varsayilan: true },
   { anahtar: 'portalKapat', ad: 'kapat', tur: 'evet', varsayilan: false },
 ];

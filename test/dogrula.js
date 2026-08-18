@@ -738,6 +738,86 @@ async function main() {
     fs.rmSync(klasor, { recursive: true, force: true });
   }
 
+  console.log('\nPortal hata kaydı');
+  {
+    const githubKayit = require('../src/main/portal/githubKayit');
+
+    const klasor = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-kayit-'));
+    fs.writeFileSync(path.join(klasor, 'ozet.json'), '{"hata":"deneme"}');
+    fs.writeFileSync(path.join(klasor, '01-giris.html'), '<html>giris</html>');
+    fs.writeFileSync(path.join(klasor, '05-kuyruk-HATA.html'), '<html>hata</html>');
+    fs.writeFileSync(path.join(klasor, '05-kuyruk-HATA.png'), Buffer.from([1, 2, 3]));
+
+    const secim = githubKayit.dosyalariSec(klasor);
+    kontrol('özet ve hata dosyaları seçiliyor, sağlam adımlar gönderilmiyor',
+      secim.secilen.slice().sort().join(',') === '05-kuyruk-HATA.html,05-kuyruk-HATA.png,ozet.json',
+      secim.secilen.join(','));
+
+    const klasor2 = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-kayit2-'));
+    fs.writeFileSync(path.join(klasor2, 'ozet.json'), '{}');
+    fs.writeFileSync(path.join(klasor2, '01-giris.html'), 'a');
+    fs.writeFileSync(path.join(klasor2, '02-son.html'), 'b');
+    fs.writeFileSync(path.join(klasor2, '02-son.png'), 'c');
+    kontrol('hata dosyası yoksa son adım seçiliyor',
+      githubKayit.dosyalariSec(klasor2).secilen.slice().sort().join(',')
+      === '02-son.html,02-son.png,ozet.json',
+      githubKayit.dosyalariSec(klasor2).secilen.join(','));
+
+    let ozel = true;
+    const putlar = [];
+    const sunucu = http.createServer((q, r) => {
+      let govde = '';
+      q.on('data', (p) => { govde += p; });
+      q.on('end', () => {
+        r.setHeader('Content-Type', 'application/json');
+        if (q.method === 'GET') { r.end(JSON.stringify({ private: ozel })); return; }
+        if (q.method === 'PUT') {
+          putlar.push({ yol: q.url, icerik: JSON.parse(govde), yetki: q.headers.authorization });
+          r.statusCode = 201;
+          r.end('{}');
+          return;
+        }
+        r.statusCode = 404;
+        r.end('{}');
+      });
+    });
+    await new Promise((r) => sunucu.listen(0, '127.0.0.1', r));
+    const apiKok = `http://127.0.0.1:${sunucu.address().port}`;
+
+    const sonuc = await githubKayit.yukle({
+      depo: 'kisi/kayit', token: 'tkn', klasor, makine: 'MAKINE 1', apiKok,
+    });
+    kontrol('dosyalar özel depoya yüklendi',
+      sonuc.gonderilen.length === 3 && putlar.length === 3
+      && putlar.every((p) => p.yetki === 'Bearer tkn'),
+      JSON.stringify(sonuc));
+    kontrol('hedef yol makine ve çalışma klasörüyle kuruluyor',
+      sonuc.hedef === `kayitlar/MAKINE-1/${path.basename(klasor)}`
+      && putlar.every((p) => p.yol.startsWith('/repos/kisi/kayit/contents/kayitlar/MAKINE-1/')),
+      sonuc.hedef);
+    kontrol('dosya içeriği aynen gidiyor',
+      Buffer.from(putlar.find((p) => p.yol.endsWith('ozet.json')).icerik.content, 'base64')
+        .toString() === '{"hata":"deneme"}');
+
+    ozel = false;
+    putlar.length = 0;
+    const acikHata = await githubKayit.yukle({
+      depo: 'kisi/kayit', token: 'tkn', klasor, makine: 'M', apiKok,
+    }).then(() => null, (e) => e.message);
+    kontrol('depo özel değilse tek dosya bile gönderilmiyor',
+      /özel/.test(acikHata || '') && putlar.length === 0, acikHata);
+
+    const bicimHata = await githubKayit.yukle({
+      depo: 'yalnız-depo-adı', token: 'tkn', klasor, makine: 'M', apiKok,
+    }).then(() => null, (e) => e.message);
+    kontrol('bozuk depo adı istek atılmadan reddediliyor',
+      /biçiminde/.test(bicimHata || ''), bicimHata);
+
+    sunucu.close();
+    fs.rmSync(klasor, { recursive: true, force: true });
+    fs.rmSync(klasor2, { recursive: true, force: true });
+  }
+
   console.log('\nPortal hesapları ve ayarları');
   {
     const portalAyar = require('../src/main/portal/ayar');

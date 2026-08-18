@@ -1898,6 +1898,15 @@ function portalKarti(ayar, hesaplar) {
         ${alan('pYenilemeSn', 'Kuyruk yenileme aralığı (saniye)', ayar.yenilemeSn, 'number', '120')}
         ${alan('pBeklemeDk', 'Rapor için azami bekleme (dakika)', ayar.beklemeDk, 'number', '60')}
         ${alan('pSayfaSn', 'Sayfa yüklenmesi için azami bekleme (saniye)', ayar.sayfaSn, 'number', '180')}
+        ${alan('pKayitDepo', 'Hata kayıtları için ÖZEL GitHub deposu (kullanici/depo)',
+    ayar.kayitDepo, 'text', 'ör. kullanici/portal-kayitlari')}
+        ${alan('pKayitToken', 'GitHub erişim anahtarı (token)', '', 'password',
+    ayar.kayitTokenVar ? 'kayıtlı — değiştirmek için yazın' : 'github.com → Settings → Tokens')}
+        <div class="text-[11.5px] text-fg-3 md:col-span-2">
+          Depo ve anahtar girilirse, portal işlemi hata verdiğinde son çalışmanın adım
+          kayıtları (HTML + ekran görüntüsü + özet) o depoya yüklenir. Depo <b>özel
+          (private)</b> olmalı — uygulama, depo herkese açıksa göndermeyi reddeder.
+        </div>
         <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
           <input type="checkbox" id="pGorunur" class="size-4 accent-[#3ecf8e]"
                  ${ayar.gorunur ? 'checked' : ''} /> Tarayıcı penceresi görünsün
@@ -2115,12 +2124,16 @@ function portalBagla(ayar) {
         yenilemeSn: el('pYenilemeSn').value,
         beklemeDk: el('pBeklemeDk').value,
         sayfaSn: el('pSayfaSn').value,
+        kayitDepo: el('pKayitDepo').value,
+        kayitToken: el('pKayitToken').value,
         gorunur: el('pGorunur').checked,
         kapat: el('pKapat').checked,
         menuXpath: el('pMenu').value,
         altMenuXpath: el('pAltMenu').value,
       }));
       el('pAna').value = yeni.anaUrl || '';
+      el('pKayitToken').value = '';
+      if (yeni.kayitTokenVar) el('pKayitToken').placeholder = 'kayıtlı — değiştirmek için yazın';
       bildir('Portal ayarları kaydedildi.', 'basari');
     } catch (e) { bildir(kacar(e.message), 'hata'); }
     finally { b.disabled = false; }

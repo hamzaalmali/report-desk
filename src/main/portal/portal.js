@@ -953,6 +953,7 @@ async function calistir(istek) {
       fs.writeFileSync(path.join(klasor, 'ozet.json'),
         JSON.stringify({ klasor, hata: e.message, adimlar }, null, 2), 'utf8');
     } catch { }
+    e.klasor = klasor;
     log(`Portal işlemi başarısız: ${e.message}`);
     throw e;
   } finally {

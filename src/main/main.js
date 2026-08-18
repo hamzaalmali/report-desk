@@ -18,6 +18,7 @@ const kilit = require('./kilit');
 const ortak = require('./ortak');
 const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
+const githubKayit = require('./portal/githubKayit');
 const kesintiTablosu = require('./tablo/kesintiTablosu');
 const kasa = require('./portal/kasa');
 const sahiplik = require('./whatsapp/sahiplik');
@@ -503,18 +504,51 @@ async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme, raporla
   if (eksik.length) throw new Error(`Portal ayarları eksik: ${eksik.join(', ')}.`);
   const hesap = hesabiHazirla(numara);
 
-  return portal.calistir({
-    hesap,
-    ayarlar,
-    raporlar,
-    kokKlasor: PORTAL_KLASORU(),
-    onayKodu,
-    dosyaHazir,
+  try {
+    return await portal.calistir({
+      hesap,
+      ayarlar,
+      raporlar,
+      kokKlasor: PORTAL_KLASORU(),
+      onayKodu,
+      dosyaHazir,
+      log: kayit,
+      ilerleme: (o) => {
+        portalIlerlemeYolla(o);
+        if (ilerleme) { try { ilerleme(o); } catch { } }
+      },
+    });
+  } catch (e) {
+    hataKaydiniGonder(e.klasor);
+    throw e;
+  }
+}
+
+function hataKaydiniGonder(klasor) {
+  if (!klasor) return;
+  const ayarlar = portalAyarlari();
+  const tokenSifreli = db.ortakAyarOku('portalKayitToken');
+  if (!ayarlar.kayitDepo || !tokenSifreli) return;
+
+  let token = '';
+  try {
+    token = kasa.coz(tokenSifreli, db.ortakAyarOku('portalKayitTokenSema'));
+  } catch (e) {
+    kayit(`Portal hata kaydı gönderilemedi: erişim anahtarı çözülemedi (${e.message}).`);
+    return;
+  }
+
+  githubKayit.yukle({
+    depo: ayarlar.kayitDepo,
+    token,
+    klasor,
+    makine: ortak.makineAdi(),
     log: kayit,
-    ilerleme: (o) => {
-      portalIlerlemeYolla(o);
-      if (ilerleme) { try { ilerleme(o); } catch { } }
-    },
+  }).then((r) => {
+    kayit(`Portal hata kaydı GitHub'a gönderildi: ${r.hedef} (${r.gonderilen.length} dosya`
+      + `${r.atlanan.length ? `, ${r.atlanan.length} atlandı` : ''}).`);
+  }).catch((e) => {
+    kayit(`Portal hata kaydı gönderilemedi: ${e.message}`);
   });
 }
 
@@ -1115,8 +1149,24 @@ kanal('portalAyar', () => ({
   kasaVar: kasa.kullanilabilir(),
   ortakAnahtar: !!ortakAnahtar(),
   klasor: PORTAL_KLASORU(),
+  kayitTokenVar: !!db.ortakAyarOku('portalKayitToken'),
 }));
-kanal('portalAyarYaz', (gelen) => portalAyar.yaz(db, gelen || {}));
+kanal('portalAyarYaz', (gelen) => {
+  const veri = { ...(gelen || {}) };
+  if (Object.prototype.hasOwnProperty.call(veri, 'kayitToken')) {
+    const t = String(veri.kayitToken || '').trim();
+    delete veri.kayitToken;
+    if (t) {
+      const k = kasa.sifrele(t);
+      db.ortakAyarYaz('portalKayitToken', k.deger);
+      db.ortakAyarYaz('portalKayitTokenSema', String(k.sifreli));
+    }
+  }
+  return {
+    ...portalAyar.yaz(db, veri),
+    kayitTokenVar: !!db.ortakAyarOku('portalKayitToken'),
+  };
+});
 kanal('portalHesaplar', () => db.portalHesaplar());
 
 kanal('portalHesapYaz', (gelen) => {
