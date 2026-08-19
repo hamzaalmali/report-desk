@@ -246,9 +246,15 @@ async function main() {
   }
 
   console.log('\nGünlük rapor aktarımı');
-  const tarihliIlk = excelAra(KOK).find((f) => /\d{2}\.\d{2}\.\d{4}/.test(path.basename(f)));
-  const gunlukDosyalar = tarihliIlk
-    ? excelAra(path.dirname(tarihliIlk)).filter((f) => path.dirname(f) === path.dirname(tarihliIlk))
+  const tarihliler = excelAra(KOK).filter((f) => /\d{2}\.\d{2}\.\d{4}/.test(path.basename(f)));
+  const klasorSayisi = new Map();
+  for (const f of tarihliler) {
+    const k = path.dirname(f);
+    klasorSayisi.set(k, (klasorSayisi.get(k) || 0) + 1);
+  }
+  const enDolu = [...klasorSayisi.entries()].sort((a, b) => b[1] - a[1])[0];
+  const gunlukDosyalar = enDolu
+    ? excelAra(enDolu[0]).filter((f) => path.dirname(f) === enDolu[0])
     : [];
   if (!gunlukDosyalar.length) {
     console.log('  ! günlük rapor dosyası bulunamadı, atlandı.');
@@ -629,11 +635,13 @@ async function main() {
       [],
       ['Parametre', 'BASTARIH=16.08.2026 SONTARIH=17.08.2026'],
       ['KESİNTİNİN KODU (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)',
-        'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)'],
-      [5001, 1, 'BURSA', 'KESTEL', 'OG HAT BAKIM', 10.4],
-      [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5'],
-      [5003, 1, 'YALOVA', 'MERKEZ', 'KUŞ ÇARPMASI', 6],
-      [5004, 1, 'BURSA', 'NİLÜFER', 'SCADA-MANEVRA', '2,5'],
+        'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)',
+        'KENTSEL OG (9A)', 'KENTSEL AG (9B)', 'KIRSAL OG (9C)', 'KIRSAL AG (9D)',
+        'DİĞER OG (9E)', 'DİĞER AG (9F)', 'GEREKSİZ (10)', 'GEREKSİZ (11)'],
+      [5004, 1, 'BURSA', 'NİLÜFER', 'SCADA-MANEVRA', '2,5', 40, null, null, null, null, null, 'çöp', 'çöp'],
+      [5001, 1, 'BURSA', 'KESTEL', 'OG HAT BAKIM', 10.4, 1000, 500, 0, 0, 0, 0, 'çöp', 'çöp'],
+      [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5', '1.000', 250, null, null, null, null, 'çöp', 'çöp'],
+      [5003, 1, 'YALOVA', 'MERKEZ', 'KUŞ ÇARPMASI', 6, 0, 0, 1000, 0, 0, 0, 'çöp', 'çöp'],
     ]);
 
     await yazDosya(detayYol, 'Detay', [
@@ -647,6 +655,7 @@ async function main() {
       [null, 5003, 1, 'YALOVA', 'MERKEZ', 'KÖK', 'KUŞ ÇARPMASI', 1000, ''],
       [null, 5004, 1, 'BURSA', 'NİLÜFER', 'Dagitim Merkezi', 'SCADA-MANEVRA', 40, 'osos notu'],
       [null, 5005, 1, 'BURSA', 'İNEGÖL', 'Dağıtım Transformatörü', 'AG ABONE KABLOSU', 10, ''],
+      [null, 5006, 1, 'BURSA', 'KELES', 'Dağıtım Transformatörü', 'AG ABONE KABLOSU', 9, 'az aboneli'],
     ]);
 
     const sonuc = await tablo.olustur({
@@ -665,8 +674,8 @@ async function main() {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(sonuc.dosya);
     const adlar = wb.worksheets.map((w) => w.name);
-    kontrol('sayfalar doğru sırada',
-      adlar.join('|') === 'AnaListe|6 Saat ve Üzeri Kesintiler|2 ve Üzeri Etkilenen İlçeler'
+    kontrol('sayfalar doğru sırada (ayrı ana liste sayfası yok)',
+      adlar.join('|') === '6 Saat ve Üzeri Kesintiler|2 ve Üzeri Etkilenen İlçeler'
       + '|Rekortman|1000 ve Üzeri Etkilenen Abone|ARIZA DETAY', adlar.join('|'));
 
     const oku = (ad) => {
@@ -679,16 +688,18 @@ async function main() {
       return { ws, satirlar };
     };
 
-    const ana = oku('AnaListe');
+    const ana = oku('ARIZA DETAY');
     const anaBaslik = [1, 2, 3, 4, 5, 6, 7, 8].map((c) => ana.ws.getRow(1).getCell(c).value);
-    kontrol('ana listeye abone ve tablet sütunları eklendi',
-      anaBaslik[6] === 'TOPLAM ABONE' && anaBaslik[7] === 'TABLET AÇIKLAMASI',
+    kontrol('9A–9F ve sonrası atılıp Toplam Abone + tablet sütunları kaldı',
+      anaBaslik[6] === 'Toplam Abone' && anaBaslik[7] === 'TABLET AÇIKLAMASI'
+      && ana.ws.getRow(1).cellCount <= 8,
       anaBaslik.join(' | '));
-    kontrol('abone ve tablet detaydan koda göre çekildi',
+    kontrol('Toplam Abone 9A–9F toplamı, tablet detaydan koda göre',
       ana.satirlar.length === 4
-      && ana.satirlar[0][6] === 1500 && ana.satirlar[0][7] === 'not-1'
-      && ana.satirlar[1][6] === 1250 && ana.satirlar[1][7] === 'kablo notu'
-      && ana.satirlar[2][6] === 1000 && ana.satirlar[3][6] === 40,
+      && ana.satirlar[0][0] === 5004 && ana.satirlar[0][6] === 40 && ana.satirlar[0][7] === 'osos notu'
+      && ana.satirlar[1][6] === 1500 && ana.satirlar[1][7] === 'not-1'
+      && ana.satirlar[2][6] === 1250 && ana.satirlar[2][7] === 'kablo notu'
+      && ana.satirlar[3][6] === 1000,
       ana.satirlar.map((s) => `${s[0]}:${s[6]}`).join(' '));
 
     const alti = oku('6 Saat ve Üzeri Kesintiler');
@@ -712,14 +723,13 @@ async function main() {
       JSON.stringify(vurgulu.fill || null));
 
     const rek = oku('Rekortman');
-    kontrol('rekortman süzgeci yazım farkına rağmen çalışıyor',
+    kontrol('rekortman süzgeci yazım farkına dayanıklı ve 10 abone altını eliyor',
       rek.satirlar.map((s) => s[0]).join(',') === '5002,5005',
       rek.satirlar.map((s) => s[0]).join(','));
 
-    const ariza = oku('ARIZA DETAY');
-    kontrol('arıza detay aboneye göre azalan sıralı',
-      ariza.satirlar.map((s) => s[0]).join(',') === '5001,5002,5003,5004',
-      ariza.satirlar.map((s) => `${s[0]}:${s[6]}`).join(' '));
+    kontrol('arıza detay ham liste sırasını koruyor',
+      ana.satirlar.map((s) => s[0]).join(',') === '5004,5001,5002,5003',
+      ana.satirlar.map((s) => `${s[0]}:${s[6]}`).join(' '));
 
     const dolu = ana.ws.getRow(1);
     kontrol('başlık satırı kalın ve süzgeçli',
@@ -736,6 +746,75 @@ async function main() {
       JSON.stringify(ters.ozet));
 
     fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
+  console.log('\nE-posta');
+  {
+    const posta = require('../src/main/posta/posta');
+
+    kontrol('alıcılar virgül, noktalı virgül ve satırla ayrılıyor',
+      posta.alicilariCoz('a@x.com, b@y.com;c@z.com\nadres-degil').join('|')
+      === 'a@x.com|b@y.com|c@z.com');
+    kontrol('eksik ayarlar adlarıyla bildiriliyor',
+      posta.dogrula({ sunucu: '', alicilar: '' }).length === 2
+      && posta.dogrula({ sunucu: 's', alicilar: 'a@x.com' }).length === 0);
+
+    const yazilan = posta.yaz(db, {
+      sunucu: 'smtp.example.com', port: '2599', guvenli: false,
+      kullanici: 'u@example.com', gonderen: '', alicilar: 'a@x.com', tabloGonder: true,
+    });
+    kontrol('ayarlar ortak ayarlara yazılıp geri okunuyor',
+      yazilan.sunucu === 'smtp.example.com' && yazilan.port === 2599
+      && yazilan.guvenli === false && yazilan.tabloGonder === true,
+      JSON.stringify(yazilan));
+
+    const net = require('node:net');
+    let govde = '';
+    const rcpt = [];
+    const smtp = net.createServer((s) => {
+      let dataModu = false;
+      s.write('220 deneme ESMTP\r\n');
+      s.on('data', (b) => {
+        const m = b.toString('utf8');
+        if (dataModu) {
+          govde += m;
+          if (govde.includes('\r\n.\r\n')) { dataModu = false; s.write('250 tamam\r\n'); }
+          return;
+        }
+        for (const satir of m.split('\r\n')) {
+          if (!satir) continue;
+          const k = satir.toUpperCase();
+          if (k.startsWith('EHLO') || k.startsWith('HELO')) {
+            s.write('250-deneme\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n');
+          } else if (k.startsWith('AUTH')) s.write('235 girildi\r\n');
+          else if (k.startsWith('RCPT')) { rcpt.push(satir); s.write('250 tamam\r\n'); }
+          else if (k.startsWith('DATA')) { dataModu = true; s.write('354 yaz\r\n'); }
+          else if (k.startsWith('QUIT')) { s.write('221 hoscakal\r\n'); s.end(); }
+          else s.write('250 tamam\r\n');
+        }
+      });
+    });
+    await new Promise((r) => smtp.listen(0, '127.0.0.1', r));
+
+    const ekYolu = path.join(os.tmpdir(), 'posta-ek-deneme.xlsx');
+    fs.writeFileSync(ekYolu, 'ek dosya içeriği');
+    const gidis = await posta.gonder({
+      ayar: {
+        sunucu: '127.0.0.1', port: smtp.address().port, guvenli: false,
+        kullanici: 'u@example.com', gonderen: '', alicilar: 'a@x.com, b@y.com',
+      },
+      sifre: 'gizli',
+      konu: 'Deneme Konusu',
+      metin: 'govde metni',
+      dosyalar: [{ dosya: ekYolu, ad: 'Kesinti-Tablosu.xlsx' }],
+    });
+    kontrol('iki alıcıya teslim edildi', gidis.alicilar.length === 2 && rcpt.length === 2,
+      rcpt.join(' '));
+    kontrol('konu ve ek dosya iletiye girdi',
+      govde.includes('Deneme Konusu') && govde.includes('Kesinti-Tablosu.xlsx'));
+
+    smtp.close();
+    fs.rmSync(ekYolu, { force: true });
   }
 
   console.log('\nPortal hata kaydı');
@@ -1353,6 +1432,98 @@ async function main() {
     const silindi = db.portalHesap('905551112233');
     db.kapat();
     kontrol('portal numarası silinince diğerinden de siliniyor', !silindi);
+
+    const geriAl = (tablo, zaman) => {
+      for (const yol of [A, B, ORTAK]) {
+        const c = ac(yol);
+        c.db.run(`UPDATE ${tablo} SET guncelleme = :z`, { ':z': zaman });
+        c.db.run("DELETE FROM silinen WHERE tur = :t", { ':t': tablo });
+        c.kapat();
+      }
+    };
+
+    db.ac(A);
+    const ekipA = db.vardiyaEkipEkle('MERKEZ EKİBİ');
+    const perA = db.vardiyaPersonelEkle(ekipA.id, 'VELİ ÇALIŞKAN');
+    db.vardiyaYaz('2026-09', perA.id, 3, 'G');
+    db.eslesmeEkle({ kaynak_deger: 'KAYNAK-X', isletme_id: db.isletmeler()[0].id, tip: 'TAM' });
+    db.onerileriYaz('2026-09-10', [{ kod_no: '111', tahmin: 'ALFA', ekip: 'MERKEZ', unsur: 'TR-1' }]);
+    db.waGruplariYaz([{ jid: '123@g.us', ad: 'Saha Grubu', katilimci: 7 }]);
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+
+    const vardiyaKodu = (yol) => {
+      db.ac(yol);
+      const k = db.vardiyaAyVerisi('2026-09').kayitlar.find((x) => x.gun === 3);
+      db.kapat();
+      return k ? k.kod : null;
+    };
+    kontrol('vardiya hücresi diğer makineye geçti', vardiyaKodu(B) === 'G');
+
+    geriAl('vardiya_kayit', '2026-08-05 08:00:00');
+    db.ac(A);
+    db.vardiyaYaz('2026-09', db.vardiyaAyVerisi('2026-09').kayitlar[0].personel_id, 3, 'A');
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+    kontrol('vardiya hücre düzeltmesi eşitleniyor', vardiyaKodu(B) === 'A', String(vardiyaKodu(B)));
+
+    geriAl('vardiya_kayit', '2026-08-05 09:00:00');
+    db.ac(B);
+    db.vardiyaYaz('2026-09', db.vardiyaAyVerisi('2026-09').kayitlar[0].personel_id, 3, '');
+    db.kapat();
+    esitleyi(B);
+    esitleyi(A);
+    kontrol('vardiya hücresini boşaltmak eşitleniyor', vardiyaKodu(A) === null,
+      String(vardiyaKodu(A)));
+
+    const oneriSay = (yol) => {
+      db.ac(yol);
+      const n = db.oneriler('2026-09-10').length;
+      db.kapat();
+      return n;
+    };
+    kontrol('öneriler diğer makineye geçti', oneriSay(B) === 1, String(oneriSay(B)));
+    geriAl('oneri', '2026-08-05 08:00:00');
+    db.ac(A);
+    db.onerileriYaz('2026-09-10', []);
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+    kontrol('öneri kalkınca diğerinden de kalkıyor', oneriSay(B) === 0, String(oneriSay(B)));
+
+    const grupSecili = (yol) => {
+      db.ac(yol);
+      const g = db.waGruplar().find((x) => x.jid === '123@g.us');
+      db.kapat();
+      return g ? g.secili : null;
+    };
+    kontrol('WhatsApp grubu diğer makineye geçti', grupSecili(B) === 0, String(grupSecili(B)));
+    geriAl('wa_grup', '2026-08-05 08:00:00');
+    db.ac(B);
+    db.waGrupSec('123@g.us', true);
+    db.kapat();
+    esitleyi(B);
+    esitleyi(A);
+    kontrol('grup seçimi eşitleniyor', grupSecili(A) === 1, String(grupSecili(A)));
+
+    const eslesmeHedefi = (yol) => {
+      db.ac(yol);
+      const e = db.eslesmeler().find((x) => x.kaynak_deger === 'KAYNAK-X');
+      db.kapat();
+      return e ? e.isletme : null;
+    };
+    geriAl('eslesme', '2026-08-05 08:00:00');
+    db.ac(A);
+    const isletmeler = db.isletmeler();
+    db.eslesmeEkle({ kaynak_deger: 'KAYNAK-X', isletme_id: isletmeler[1].id, tip: 'TAM' });
+    const yeniHedef = isletmeler[1].ad;
+    db.kapat();
+    esitleyi(A);
+    esitleyi(B);
+    kontrol('eşleşme hedefi değişince eşitleniyor', eslesmeHedefi(B) === yeniHedef,
+      String(eslesmeHedefi(B)));
 
     db.kapat();
     if (oncekiYol) db.ac(oncekiYol);

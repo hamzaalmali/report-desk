@@ -12,9 +12,12 @@ const BIN_ABONE = 1000;
 
 const REKORTMAN_NEDEN = 'AG ABONE KABLOSU';
 const REKORTMAN_KAYNAK = 'DAGITIM TRANSFORMATORU';
+const REKORTMAN_EN_AZ_ABONE = 10;
 
-const EK_ABONE = 'TOPLAM ABONE';
+const EK_ABONE = 'Toplam Abone';
 const EK_TABLET = 'TABLET AÇIKLAMASI';
+
+const DOKUZLU = /\(9[A-F]\)/;
 
 const VURGU_DOLGU = 'FFFFC7CE';
 const VURGU_YAZI = 'FF9C0006';
@@ -224,28 +227,67 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
     if (k && !ilkKayit.has(k)) ilkKayit.set(k, s);
   }
 
-  const anaBasliklar = ana.basliklar.slice();
-  let aboneSutun = sutunBul(anaBasliklar, ABONE_DESEN);
-  let tabletSutun = sutunBul(anaBasliklar, TABLET_DESEN);
-  if (aboneSutun < 0 && dAbone >= 0) {
+  const dokuzlar = ana.basliklar
+    .map((b, i) => (DOKUZLU.test(b.ad || '') ? i : -1))
+    .filter((i) => i >= 0);
+
+  let anaBasliklar;
+  let anaSatirlar;
+  let aboneSutun;
+  let tabletSutun;
+
+  if (dokuzlar.length) {
+    const ilk9 = Math.min(...dokuzlar);
+    const anaTablet = sutunBul(ana.basliklar, TABLET_DESEN);
+    anaBasliklar = ana.basliklar.slice(0, ilk9).map((b) => ({ ...b }));
     anaBasliklar.push({ ad: EK_ABONE, anahtar: key(EK_ABONE), genislik: 14 });
     aboneSutun = anaBasliklar.length - 1;
-  }
-  if (tabletSutun < 0 && dTablet >= 0) {
     anaBasliklar.push({ ad: EK_TABLET, anahtar: key(EK_TABLET), genislik: 40 });
     tabletSutun = anaBasliklar.length - 1;
-  }
 
-  const anaSatirlar = ana.satirlar.map((s) => {
-    const yeni = s.slice();
-    while (yeni.length < anaBasliklar.length) yeni.push(null);
-    const d = ilkKayit.get(kodMetni(s[anaKod]));
-    if (d) {
-      if (aboneSutun >= ana.basliklar.length && dAbone >= 0) yeni[aboneSutun] = sayi(d[dAbone]);
-      if (tabletSutun >= ana.basliklar.length && dTablet >= 0) yeni[tabletSutun] = d[dTablet];
+    anaSatirlar = ana.satirlar.map((s) => {
+      const yeni = s.slice(0, ilk9);
+      while (yeni.length < aboneSutun) yeni.push(null);
+      let toplam = null;
+      for (const i of dokuzlar) {
+        const v = sayi(s[i]);
+        if (v != null) toplam = (toplam || 0) + v;
+      }
+      yeni[aboneSutun] = toplam;
+      let tablet = anaTablet >= 0 ? s[anaTablet] : null;
+      if ((tablet == null || tablet === '') && dTablet >= 0) {
+        const d = ilkKayit.get(kodMetni(s[anaKod]));
+        if (d) tablet = d[dTablet];
+      }
+      yeni[tabletSutun] = tablet == null ? null : tablet;
+      return yeni;
+    });
+    log(`Kesinti tablosu: ${dokuzlar.length} abone sütunu (9A–9F) toplanıp `
+      + '"Toplam Abone" yazıldı, aradaki sütunlar atıldı.');
+  } else {
+    anaBasliklar = ana.basliklar.slice();
+    aboneSutun = sutunBul(anaBasliklar, ABONE_DESEN);
+    tabletSutun = sutunBul(anaBasliklar, TABLET_DESEN);
+    if (aboneSutun < 0 && dAbone >= 0) {
+      anaBasliklar.push({ ad: EK_ABONE, anahtar: key(EK_ABONE), genislik: 14 });
+      aboneSutun = anaBasliklar.length - 1;
     }
-    return yeni;
-  });
+    if (tabletSutun < 0 && dTablet >= 0) {
+      anaBasliklar.push({ ad: EK_TABLET, anahtar: key(EK_TABLET), genislik: 40 });
+      tabletSutun = anaBasliklar.length - 1;
+    }
+
+    anaSatirlar = ana.satirlar.map((s) => {
+      const yeni = s.slice();
+      while (yeni.length < anaBasliklar.length) yeni.push(null);
+      const d = ilkKayit.get(kodMetni(s[anaKod]));
+      if (d) {
+        if (aboneSutun >= ana.basliklar.length && dAbone >= 0) yeni[aboneSutun] = sayi(d[dAbone]);
+        if (tabletSutun >= ana.basliklar.length && dTablet >= 0) yeni[tabletSutun] = d[dTablet];
+      }
+      return yeni;
+    });
+  }
 
   const aboneDegeri = (s) => (aboneSutun >= 0 ? sayi(s[aboneSutun]) : null);
 
@@ -253,13 +295,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
     : anaSatirlar.filter((s) => (sayi(s[anaSure]) || 0) >= ALTI_SAAT);
   const binAbone = aboneSutun < 0 ? []
     : anaSatirlar.filter((s) => (aboneDegeri(s) || 0) >= BIN_ABONE);
-  const arizaDetay = anaSatirlar.slice().sort((a, b) => {
-    const fa = aboneDegeri(a), fb = aboneDegeri(b);
-    if (fa == null && fb == null) return 0;
-    if (fa == null) return 1;
-    if (fb == null) return -1;
-    return fb - fa;
-  });
+  const arizaDetay = anaSatirlar;
 
   const ilceler = new Map();
   if (dIlce >= 0) {
@@ -276,11 +312,11 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
 
   const rekortman = (dNeden < 0 || dKaynak < 0) ? []
     : detay.satirlar.filter((s) => duz(s[dNeden]) === duz(REKORTMAN_NEDEN)
-      && duz(s[dKaynak]) === duz(REKORTMAN_KAYNAK));
+      && duz(s[dKaynak]) === duz(REKORTMAN_KAYNAK)
+      && (dAbone < 0 || (sayi(s[dAbone]) || 0) >= REKORTMAN_EN_AZ_ABONE));
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Report Desk';
-  sayfaYaz(wb, ana.ad || 'Kesintiler', anaBasliklar, anaSatirlar);
   sayfaYaz(wb, '6 Saat ve Üzeri Kesintiler', anaBasliklar, altiSaat);
   sayfaYaz(wb, '2 ve Üzeri Etkilenen İlçeler', detay.basliklar, ikiIlce,
     { vurgulu: { sutun: dKod, kodlar: cokIlceli } });
@@ -307,5 +343,5 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
 
 module.exports = {
   olustur, sayi, duz, sutunBul,
-  ALTI_SAAT, BIN_ABONE, REKORTMAN_NEDEN, REKORTMAN_KAYNAK,
+  ALTI_SAAT, BIN_ABONE, REKORTMAN_NEDEN, REKORTMAN_KAYNAK, REKORTMAN_EN_AZ_ABONE,
 };

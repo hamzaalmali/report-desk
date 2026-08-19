@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS oneri (
   tahmin   TEXT,
   ekip     TEXT,
   unsur    TEXT,
-  islendi  INTEGER NOT NULL DEFAULT 0
+  islendi  INTEGER NOT NULL DEFAULT 0,
+  guncelleme TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS ix_oneri_tarih ON oneri (tarih);

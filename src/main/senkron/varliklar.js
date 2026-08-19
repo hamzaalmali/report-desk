@@ -279,6 +279,79 @@ const VARLIKLAR = [
   },
 
   {
+    tur: 'oneri',
+    oku(db) {
+      const sorgu = `SELECT tarih, kod_no, tahmin, ekip, unsur, islendi, guncelleme
+                     FROM oneri`;
+      return db.all(sorgu).map((r) => ({
+        anahtar: anahtarla(r.tarih, r.kod_no || '', r.tahmin || '', r.ekip || '', r.unsur || ''),
+        guncelleme: r.guncelleme,
+        veri: {
+          tarih: r.tarih, kod_no: r.kod_no || '', tahmin: r.tahmin || '',
+          ekip: r.ekip || '', unsur: r.unsur || '', islendi: r.islendi,
+        },
+      }));
+    },
+    yaz(db, s) {
+      const p = {
+        ':t': s.veri.tarih, ':k': s.veri.kod_no, ':h': s.veri.tahmin,
+        ':e': s.veri.ekip, ':u': s.veri.unsur,
+      };
+      const var_ = db.get(
+        `SELECT id FROM oneri WHERE tarih = :t AND COALESCE(kod_no, '') = :k
+           AND COALESCE(tahmin, '') = :h AND COALESCE(ekip, '') = :e
+           AND COALESCE(unsur, '') = :u`,
+        p
+      );
+      if (var_) {
+        db.run('UPDATE oneri SET islendi = :i, guncelleme = :g WHERE id = :id',
+          { ':i': s.veri.islendi, ':g': s.guncelleme, ':id': var_.id });
+      } else {
+        db.run(
+          `INSERT INTO oneri (tarih, kod_no, tahmin, ekip, unsur, islendi, guncelleme)
+           VALUES (:t, :k, :h, :e, :u, :i, :g)`,
+          { ...p, ':i': s.veri.islendi, ':g': s.guncelleme }
+        );
+      }
+    },
+    sil(db, anahtar) {
+      const [tarih, kod, tahmin, ekip, unsur] = anahtar.split(AYRAC);
+      db.run(
+        `DELETE FROM oneri WHERE tarih = :t AND COALESCE(kod_no, '') = :k
+           AND COALESCE(tahmin, '') = :h AND COALESCE(ekip, '') = :e
+           AND COALESCE(unsur, '') = :u`,
+        { ':t': tarih, ':k': kod, ':h': tahmin, ':e': ekip, ':u': unsur }
+      );
+    },
+  },
+
+  {
+    tur: 'wa_grup',
+    oku(db) {
+      return db.all('SELECT jid, ad, katilimci, secili, guncelleme FROM wa_grup').map((r) => ({
+        anahtar: anahtarla(r.jid),
+        guncelleme: r.guncelleme,
+        veri: { jid: r.jid, ad: r.ad, katilimci: r.katilimci, secili: r.secili },
+      }));
+    },
+    yaz(db, s) {
+      db.run(
+        `INSERT INTO wa_grup (jid, ad, katilimci, secili, guncelleme)
+         VALUES (:j, :a, :k, :s, :g)
+         ON CONFLICT(jid) DO UPDATE SET ad = excluded.ad, katilimci = excluded.katilimci,
+           secili = excluded.secili, guncelleme = excluded.guncelleme`,
+        {
+          ':j': s.veri.jid, ':a': s.veri.ad, ':k': s.veri.katilimci,
+          ':s': s.veri.secili, ':g': s.guncelleme,
+        }
+      );
+    },
+    sil(db, anahtar) {
+      db.run('DELETE FROM wa_grup WHERE jid = :j', { ':j': anahtar });
+    },
+  },
+
+  {
     tur: 'vardiya_kayit',
     oku(db) {
       const sorgu = `SELECT v.ay, v.gun, v.kod, v.guncelleme, p.ad, e.ad AS ekip

@@ -100,6 +100,7 @@ function ac(dosyaYolu) {
 
 const DAMGALI_TABLOLAR = [
   'isletme', 'eslesme', 'gun_kategori', 'vardiya_ekip', 'vardiya_personel', 'vardiya_kayit',
+  'oneri',
 ];
 
 const TASINAN_AYARLAR = ['waIzinliNumaralar'];
@@ -457,6 +458,9 @@ function gunSil(tarih) {
        WHERE g.tarih = :t`, { ':t': tarih })) {
       mezarYaz('gun_kategori', anahtarBirlestir(tarih, g.kod));
     }
+    for (const o of db.all('SELECT * FROM oneri WHERE tarih = :t', { ':t': tarih })) {
+      mezarYaz('oneri', oneriAnahtari(o));
+    }
     db.run('DELETE FROM kayit WHERE tarih = :t', { ':t': tarih });
     db.run('DELETE FROM gun_kategori WHERE tarih = :t', { ':t': tarih });
     db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
@@ -516,7 +520,8 @@ function eslesmeler() {
 function eslesmeEkle({ kaynak_deger, isletme_id, tip }) {
   db.run(
     `INSERT INTO eslesme (kaynak_deger, isletme_id, tip) VALUES (:k, :i, :t)
-     ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id`,
+     ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id,
+       guncelleme = datetime('now')`,
     { ':k': kaynak_deger.trim(), ':i': isletme_id, ':t': tip === 'İÇERİR' ? 'İÇERİR' : 'TAM' }
   );
 }
@@ -557,7 +562,8 @@ function eslesmeleriIceAktar(veri) {
       if (!hedef) continue;
       db.run(
         `INSERT INTO eslesme (kaynak_deger, isletme_id, tip) VALUES (:k, :i, :t)
-         ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id`,
+         ON CONFLICT(kaynak_deger, tip) DO UPDATE SET isletme_id = excluded.isletme_id,
+           guncelleme = datetime('now')`,
         { ':k': e.kaynak_deger, ':i': hedef.id, ':t': e.tip === 'İÇERİR' ? 'İÇERİR' : 'TAM' }
       );
       eslesme++;
@@ -566,15 +572,27 @@ function eslesmeleriIceAktar(veri) {
   return { isletme, eslesme };
 }
 
+function oneriAnahtari(o) {
+  return anahtarBirlestir(o.tarih, o.kod_no || '', o.tahmin || '', o.ekip || '', o.unsur || '');
+}
+
 function onerileriYaz(tarih, kayitlar) {
+  const eskiler = db.all('SELECT * FROM oneri WHERE tarih = :t', { ':t': tarih });
   db.run('DELETE FROM oneri WHERE tarih = :t', { ':t': tarih });
   const st = db.prepare(
-    'INSERT INTO oneri (tarih, kod_no, tahmin, ekip, unsur) VALUES (:t, :k, :h, :e, :u)'
+    `INSERT INTO oneri (tarih, kod_no, tahmin, ekip, unsur, guncelleme)
+     VALUES (:t, :k, :h, :e, :u, datetime('now'))`
   );
+  const yeniler = new Set();
   for (const o of kayitlar) {
     st.run({ ':t': tarih, ':k': o.kod_no || '', ':h': o.tahmin || '', ':e': o.ekip || '', ':u': o.unsur || '' });
+    yeniler.add(oneriAnahtari({ tarih, ...o }));
   }
   st.finalize();
+  for (const e of eskiler) {
+    const a = oneriAnahtari(e);
+    if (!yeniler.has(a)) mezarYaz('oneri', a);
+  }
 }
 
 function oneriler(tarih) {
@@ -692,13 +710,20 @@ function vardiyaAylar() {
 function vardiyaYaz(ay, personelId, gun, kod) {
   const temiz = String(kod == null ? '' : kod).trim();
   if (!temiz) {
+    const v = db.get(
+      `SELECT p.ad, e.ad AS ekip FROM vardiya_personel p
+       JOIN vardiya_ekip e ON e.id = p.ekip_id WHERE p.id = :p`,
+      { ':p': personelId }
+    );
     db.run('DELETE FROM vardiya_kayit WHERE ay = :a AND personel_id = :p AND gun = :g',
       { ':a': ay, ':p': personelId, ':g': gun });
+    if (v) mezarYaz('vardiya_kayit', anahtarBirlestir(ay, v.ekip, v.ad, gun));
     return { ay, personel_id: personelId, gun, kod: '' };
   }
   db.run(
     `INSERT INTO vardiya_kayit (ay, personel_id, gun, kod) VALUES (:a, :p, :g, :k)
-     ON CONFLICT(ay, personel_id, gun) DO UPDATE SET kod = excluded.kod`,
+     ON CONFLICT(ay, personel_id, gun) DO UPDATE SET kod = excluded.kod,
+       guncelleme = datetime('now')`,
     { ':a': ay, ':p': personelId, ':g': gun, ':k': temiz }
   );
   return { ay, personel_id: personelId, gun, kod: temiz };
@@ -743,7 +768,8 @@ function waGruplariYaz(liste) {
 }
 
 function waGrupSec(jid, secili) {
-  db.run('UPDATE wa_grup SET secili = :s WHERE jid = :j', { ':s': secili ? 1 : 0, ':j': jid });
+  db.run("UPDATE wa_grup SET secili = :s, guncelleme = datetime('now') WHERE jid = :j",
+    { ':s': secili ? 1 : 0, ':j': jid });
   return waGruplar();
 }
 

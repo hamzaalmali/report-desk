@@ -1968,6 +1968,88 @@ function portalKarti(ayar, hesaplar) {
     </div>`;
 }
 
+function epostaKarti(ayar) {
+  const alan = (id, etiket, deger, tur = 'text', ipucu = '') => `
+    <label class="flex flex-col gap-1">
+      <span class="text-[11px] text-fg-3">${etiket}</span>
+      <input type="${tur}" id="${id}" class="input" value="${kacar(deger == null ? '' : deger)}"
+             placeholder="${kacar(ipucu)}" />
+    </label>`;
+
+  return `
+    <div class="card">
+      <div class="card-head">
+        <div>
+          <div class="font-medium">E-posta</div>
+          <div class="text-[11.5px] text-fg-3">
+            Hazırlanan kesinti tablosu, aşağıdaki alıcılara e-postayla da gönderilir</div>
+        </div>
+        <span class="chip border-line-2 text-fg-3">
+          ${ayar.sunucu ? 'ayarlı' : 'ayarlanmadı'}</span>
+      </div>
+      <div class="grid gap-3 p-5 md:grid-cols-2">
+        ${alan('ePostaSunucu', 'Giden posta sunucusu (SMTP)', ayar.sunucu, 'text', 'ör. smtp.gmail.com')}
+        ${alan('ePostaPort', 'Kapı (port)', ayar.port, 'number', '587')}
+        ${alan('ePostaKullanici', 'Kullanıcı adı (e-posta adresi)', ayar.kullanici, 'text',
+    'ornek@kurum.com.tr')}
+        ${alan('ePostaSifre', 'Şifre', '', 'password',
+    ayar.sifreVar ? 'kayıtlı — değiştirmek için yazın' : 'uygulama şifresi önerilir')}
+        ${alan('ePostaGonderen', 'Gönderen adresi (boşsa kullanıcı adı)', ayar.gonderen, 'text', '')}
+        ${alan('ePostaAlicilar', 'Alıcılar (virgülle ayırın)', ayar.alicilar, 'text',
+    'kisi1@kurum.com.tr, kisi2@kurum.com.tr')}
+        <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+          <input type="checkbox" id="ePostaGuvenli" class="size-4 accent-[#3ecf8e]"
+                 ${ayar.guvenli ? 'checked' : ''} /> SSL bağlantısı (465 numaralı kapı)
+        </label>
+        <label class="flex items-center gap-2 text-[12.5px] text-fg-2">
+          <input type="checkbox" id="ePostaTablo" class="size-4 accent-[#3ecf8e]"
+                 ${ayar.tabloGonder ? 'checked' : ''} /> Tablo hazırlanınca e-postayla gönder
+        </label>
+        <div class="text-[11.5px] text-fg-3 md:col-span-2">
+          Gmail gibi hizmetlerde hesap şifresi yerine <b>uygulama şifresi</b> üretip
+          buraya yazın. Bu ayarlar ortak klasörle diğer bilgisayarlara da eşitlenir.
+        </div>
+        <div class="flex items-center gap-2 md:col-span-2">
+          <button class="btn btn-brand" id="ePostaKaydet">Ayarları kaydet</button>
+          <button class="btn" id="ePostaSinama">Sınama iletisi gönder</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function postaBagla() {
+  el('ePostaKaydet').onclick = async () => {
+    const b = el('ePostaKaydet');
+    b.disabled = true;
+    try {
+      const yeni = await cagir(api.postaAyarYaz({
+        sunucu: el('ePostaSunucu').value,
+        port: el('ePostaPort').value,
+        guvenli: el('ePostaGuvenli').checked,
+        kullanici: el('ePostaKullanici').value,
+        sifre: el('ePostaSifre').value,
+        gonderen: el('ePostaGonderen').value,
+        alicilar: el('ePostaAlicilar').value,
+        tabloGonder: el('ePostaTablo').checked,
+      }));
+      el('ePostaSifre').value = '';
+      if (yeni.sifreVar) el('ePostaSifre').placeholder = 'kayıtlı — değiştirmek için yazın';
+      bildir('E-posta ayarları kaydedildi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+    finally { b.disabled = false; }
+  };
+
+  el('ePostaSinama').onclick = async () => {
+    const b = el('ePostaSinama');
+    b.disabled = true;
+    try {
+      const r = await cagir(api.postaSinama());
+      bildir(`Sınama iletisi gönderildi (${r.alici} alıcı). Gelen kutusunu kontrol edin.`, 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+    finally { b.disabled = false; }
+  };
+}
+
 function portalHesapSatirlari(hesaplar) {
   const govde = el('pHesapGovde');
   if (!govde) return;
@@ -2192,17 +2274,22 @@ function portalBagla(ayar) {
     async (numara) => {
       const r = await cagir(api.tabloCalistir(numara));
       const o = r.ozet || {};
+      const p = r.posta;
+      const postaNotu = !p ? ''
+        : (p.ok ? `<br>E-postayla da gönderildi (${p.alici} alıcı).`
+          : `<br>E-posta gönderilemedi: ${kacar(p.hata || '')}`);
       bildir(`<b>Tablo hazırlandı.</b><br>${kacar(r.dosyaAdi || '')}<br>`
         + `Kesinti: ${o.toplam ?? '-'} · 6 saat+: ${o.altiSaat ?? '-'} · `
         + `1000+ abone: ${o.binAbone ?? '-'} · 2+ ilçe: ${o.ikiIlce ?? '-'} · `
-        + `Rekortman: ${o.rekortman ?? '-'}`, 'basari');
+        + `Rekortman: ${o.rekortman ?? '-'}${postaNotu}`, p && !p.ok ? 'uyari' : 'basari');
     });
 }
 
 async function sayfaAyarlar() {
-  const [surum, ozet, loglar, isletmeler, ortak, pAyar, pHesaplar] = await Promise.all([
+  const [surum, ozet, loglar, isletmeler, ortak, pAyar, pHesaplar, eAyar] = await Promise.all([
     cagir(api.surum()), cagir(api.ozet()), cagir(api.loglar()), cagir(api.isletmeler()),
     cagir(api.ortakDurum()), cagir(api.portalAyar()), cagir(api.portalHesaplar()),
+    cagir(api.postaAyar()),
   ]);
   D.portalHesaplar = pHesaplar;
 
@@ -2274,13 +2361,16 @@ async function sayfaAyarlar() {
             belirlenen aralıkla <b class="text-fg-2">iki yönlü birleştirilir</b> — sizin
             girdikleriniz oraya gider, başkalarının girdikleri size gelir.
             Aynı hücreyi ikiniz de değiştirdiyseniz <b class="text-fg-2">en son yapılan</b> kalır.
-            Rapor portalı ayarları, portal numaraları ve WhatsApp izinli numaraları da
-            eşitlenir. İşlem günlüğü ve program ayarları her bilgisayara özeldir.
+            Günlük takip, vardiya, eşleştirmeler, öneriler, portal ve e-posta ayarları,
+            portal numaraları, WhatsApp izinli numaraları ve grup seçimleri de eşitlenir.
+            İşlem günlüğü her bilgisayara özeldir.
           </div>
         </div>
       </div>
 
       ${portalKarti(pAyar, pHesaplar)}
+
+      ${epostaKarti(eAyar)}
 
       <div class="card overflow-hidden">
         <div class="card-head">
@@ -2360,6 +2450,7 @@ async function sayfaAyarlar() {
   el('vtAc').onclick = () => api.klasorAc(surum.vt);
   el('gunlukAc').onclick = () => api.gunluguAc();
   portalBagla(pAyar);
+  postaBagla();
 
   const ortakYaz = (d) => {
     const kutu = el('ortakDurum');

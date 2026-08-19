@@ -82,6 +82,10 @@ contextBridge.exposeInMainWorld('api', {
   portalOnayVer: (kod) => cagir('portalOnayVer', kod),
   portalDinle: (fn) => { ipcRenderer.on('portalIlerleme', (_o, veri) => fn(veri)); },
 
+  postaAyar: () => cagir('postaAyar'),
+  postaAyarYaz: (gelen) => cagir('postaAyarYaz', gelen),
+  postaSinama: () => cagir('postaSinama'),
+
   kilitDurum: () => cagir('kilitDurum'),
   kilitTazele: () => cagir('kilitTazele'),
 

@@ -20,6 +20,7 @@ const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
 const githubKayit = require('./portal/githubKayit');
 const kesintiTablosu = require('./tablo/kesintiTablosu');
+const posta = require('./posta/posta');
 const kasa = require('./portal/kasa');
 const sahiplik = require('./whatsapp/sahiplik');
 const senkron = require('./senkron/senkron');
@@ -659,6 +660,33 @@ function tabloOzetMetni(tablo) {
     + `1000+ abone: ${o.binAbone} · 2+ ilçe: ${o.ikiIlce} · Rekortman: ${o.rekortman}`;
 }
 
+function postaSifresi() {
+  const sifreli = db.ortakAyarOku('postaSifre');
+  if (!sifreli) return '';
+  return kasa.coz(sifreli, db.ortakAyarOku('postaSifreSema'));
+}
+
+async function tabloyuPostala(tablo, aralik) {
+  const ayar = posta.oku(db);
+  if (!ayar.tabloGonder || !posta.hazirMi(ayar)) return null;
+  try {
+    const { alicilar } = await posta.gonder({
+      ayar,
+      sifre: postaSifresi(),
+      konu: tablo.ad.replace(/\.xlsx$/i, ''),
+      metin: `Tarih: ${aralik.bas} – ${aralik.son} (${aralik.saat})\n${tabloOzetMetni(tablo)}\n\n`
+        + 'Bu ileti Report Desk tarafından gönderildi.',
+      dosyalar: [{ dosya: tablo.dosya, ad: tablo.ad }],
+    });
+    db.logYaz(null, 'e-posta', `Kesinti tablosu e-postayla gönderildi → ${alicilar.length} alıcı`);
+    return { ok: true, alici: alicilar.length };
+  } catch (e) {
+    kayit(`Kesinti tablosu e-postayla gönderilemedi: ${e.message}`);
+    db.logYaz(null, 'e-posta', `Kesinti tablosu e-postayla gönderilemedi: ${e.message}`);
+    return { ok: false, hata: e.message };
+  }
+}
+
 async function waTabloKomutu(b) {
   if (portal.durumAl().calisiyor) return 'Portal işlemi hâlihazırda çalışıyor, bitince yeniden yazın.';
 
@@ -697,14 +725,20 @@ async function waTabloKomutu(b) {
   const { sonuc, tablo } = hazir;
   db.logYaz(null, 'portal', `WhatsApp tablo isteği (${b.gonderen}) → ${tablo.ad}`);
 
+  const postaSonucu = await tabloyuPostala(tablo, sonuc.aralik);
+  const postaNotu = !postaSonucu ? ''
+    : (postaSonucu.ok
+      ? `\nE-postayla da gönderildi (${postaSonucu.alici} alıcı).`
+      : `\nE-posta gönderilemedi: ${postaSonucu.hata}`);
+
   const baslik = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
-    + tabloOzetMetni(tablo);
+    + tabloOzetMetni(tablo) + postaNotu;
   try {
     await wa.belgeGonder(b.sohbet, tablo.dosya, tablo.ad, baslik);
   } catch (e) {
     kayit(`Tablo dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
     return `Tablo hazırlandı ama dosya gönderilemedi: ${e.message}\n\n`
-      + `Dosya: ${tablo.ad}\nKlasör: ${sonuc.klasor}`;
+      + `Dosya: ${tablo.ad}\nKlasör: ${sonuc.klasor}${postaNotu}`;
   }
   return null;
 }
@@ -1217,7 +1251,48 @@ kanal('portalCalistir', async (numara) => {
 kanal('tabloCalistir', async (numara) => {
   const { sonuc, tablo } = await tabloyuHazirla({ numara, onayKodu: uiOnayIste });
   db.logYaz(null, 'portal', `Tablo elle hazırlandı (${numara}) → ${tablo.ad}`);
-  return { dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet };
+  const postaSonucu = await tabloyuPostala(tablo, sonuc.aralik);
+  return {
+    dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet,
+    posta: postaSonucu,
+  };
+});
+
+kanal('postaAyar', () => ({
+  ...posta.oku(db),
+  kasaVar: kasa.kullanilabilir(),
+  sifreVar: !!db.ortakAyarOku('postaSifre'),
+}));
+
+kanal('postaAyarYaz', (gelen) => {
+  const veri = { ...(gelen || {}) };
+  if (Object.prototype.hasOwnProperty.call(veri, 'sifre')) {
+    const s = String(veri.sifre || '');
+    delete veri.sifre;
+    if (s) {
+      const k = kasa.sifrele(s);
+      db.ortakAyarYaz('postaSifre', k.deger);
+      db.ortakAyarYaz('postaSifreSema', String(k.sifreli));
+    }
+  }
+  return {
+    ...posta.yaz(db, veri),
+    kasaVar: kasa.kullanilabilir(),
+    sifreVar: !!db.ortakAyarOku('postaSifre'),
+  };
+});
+
+kanal('postaSinama', async () => {
+  const ayar = posta.oku(db);
+  const { alicilar } = await posta.gonder({
+    ayar,
+    sifre: postaSifresi(),
+    konu: 'Report Desk sınama iletisi',
+    metin: `Bu bir sınama iletisidir — ${ortak.makineAdi()} bilgisayarından gönderildi.\n`
+      + 'E-posta ayarlarınız çalışıyor.',
+  });
+  db.logYaz(null, 'e-posta', `Sınama iletisi gönderildi → ${alicilar.length} alıcı`);
+  return { alici: alicilar.length };
 });
 
 kanal('kilitDurum', () => kilit.durumAl(), true);
