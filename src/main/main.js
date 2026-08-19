@@ -20,6 +20,7 @@ const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
 const githubKayit = require('./portal/githubKayit');
 const kesintiTablosu = require('./tablo/kesintiTablosu');
+const kuyruk = require('./tablo/kuyruk');
 const posta = require('./posta/posta');
 const kasa = require('./portal/kasa');
 const sahiplik = require('./whatsapp/sahiplik');
@@ -687,7 +688,41 @@ async function tabloyuPostala(tablo, aralik) {
   }
 }
 
+const tabloKuyrugu = kuyruk.olustur();
+
+async function tabloyuHazirlaDenemeli(secenekler, haber = () => { }) {
+  try {
+    return await tabloyuHazirla(secenekler);
+  } catch (e) {
+    const mesaj = e.message || '';
+    if (/durduruldu/i.test(mesaj) || /ayarları eksik/i.test(mesaj)) throw e;
+    kayit(`Tablo ilk denemede başarısız: ${mesaj} — baştan yeniden deneniyor.`);
+    db.logYaz(null, 'portal', `Tablo ilk denemede başarısız (${mesaj}), yeniden deneniyor`);
+    haber(`Tarayıcı hata verdi: ${mesaj}\nBaştan bir kez daha deneniyor…`);
+    return tabloyuHazirla(secenekler);
+  }
+}
+
+async function tabloKuyrugunaDagit(icerik) {
+  const dagitim = await tabloKuyrugu.bitir(async (sohbet) => {
+    if (icerik.dosya) await wa.belgeGonder(sohbet, icerik.dosya, icerik.ad, icerik.baslik);
+    else await wa.gonder(sohbet, icerik.metin);
+  });
+  if (dagitim.toplam) {
+    db.logYaz(null, 'portal',
+      `Tabloyu bekleyen ${dagitim.toplam} sohbetten ${dagitim.ulasan} tanesine iletildi`);
+  }
+  for (const h of dagitim.hatalar) {
+    kayit(`Tabloyu bekleyen sohbete iletilemedi (${h.sohbet}): ${h.hata}`);
+  }
+  return dagitim;
+}
+
 async function waTabloKomutu(b) {
+  if (tabloKuyrugu.calisiyorMu()) {
+    tabloKuyrugu.ekle(b.sohbet);
+    return 'Tablo şu an zaten hazırlanıyor — bitince size de gönderilecek.';
+  }
   if (portal.durumAl().calisiyor) return 'Portal işlemi hâlihazırda çalışıyor, bitince yeniden yazın.';
 
   const ayarlar = portalAyarlari();
@@ -697,12 +732,13 @@ async function waTabloKomutu(b) {
       + 'Ayarlar → Rapor portalı kartına iki rapor adını yazın.';
   }
 
+  tabloKuyrugu.basla();
   await b.gonder('Portala giriliyor — tablo için iki rapor indirilecek…');
   const haber = (metin) => { b.gonder(metin).catch(() => { }); };
 
   let hazir = null;
   try {
-    hazir = await tabloyuHazirla({
+    hazir = await tabloyuHazirlaDenemeli({
       numara: b.gonderen,
       onayKodu: async (deneme, sonHata) => {
         const soru = (sonHata ? `${sonHata}\n\n` : '')
@@ -717,7 +753,10 @@ async function waTabloKomutu(b) {
             + `(her ${ayarlar.yenilemeSn} saniyede bir bakılacak).`);
         }
       },
-    });
+    }, haber);
+  } catch (e) {
+    await tabloKuyrugunaDagit({ metin: `Tablo hazırlanamadı: ${e.message}` });
+    throw e;
   } finally {
     wa.soruDusur(b.gonderen);
   }
@@ -733,11 +772,16 @@ async function waTabloKomutu(b) {
 
   const baslik = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
     + tabloOzetMetni(tablo) + postaNotu;
+  let gonderimHatasi = null;
   try {
     await wa.belgeGonder(b.sohbet, tablo.dosya, tablo.ad, baslik);
   } catch (e) {
+    gonderimHatasi = e;
     kayit(`Tablo dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
-    return `Tablo hazırlandı ama dosya gönderilemedi: ${e.message}\n\n`
+  }
+  await tabloKuyrugunaDagit({ dosya: tablo.dosya, ad: tablo.ad, baslik });
+  if (gonderimHatasi) {
+    return `Tablo hazırlandı ama dosya gönderilemedi: ${gonderimHatasi.message}\n\n`
       + `Dosya: ${tablo.ad}\nKlasör: ${sonuc.klasor}${postaNotu}`;
   }
   return null;
@@ -1249,9 +1293,24 @@ kanal('portalCalistir', async (numara) => {
 });
 
 kanal('tabloCalistir', async (numara) => {
-  const { sonuc, tablo } = await tabloyuHazirla({ numara, onayKodu: uiOnayIste });
+  if (tabloKuyrugu.calisiyorMu()) throw new Error('Tablo şu an zaten hazırlanıyor.');
+  tabloKuyrugu.basla();
+  let hazir = null;
+  try {
+    hazir = await tabloyuHazirlaDenemeli({ numara, onayKodu: uiOnayIste });
+  } catch (e) {
+    await tabloKuyrugunaDagit({ metin: `Tablo hazırlanamadı: ${e.message}` });
+    throw e;
+  }
+  const { sonuc, tablo } = hazir;
   db.logYaz(null, 'portal', `Tablo elle hazırlandı (${numara}) → ${tablo.ad}`);
   const postaSonucu = await tabloyuPostala(tablo, sonuc.aralik);
+  await tabloKuyrugunaDagit({
+    dosya: tablo.dosya,
+    ad: tablo.ad,
+    baslik: `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
+      + tabloOzetMetni(tablo),
+  });
   return {
     dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet,
     posta: postaSonucu,

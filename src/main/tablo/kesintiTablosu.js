@@ -253,7 +253,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
         const v = sayi(s[i]);
         if (v != null) toplam = (toplam || 0) + v;
       }
-      yeni[aboneSutun] = toplam;
+      yeni[aboneSutun] = toplam == null ? null : Math.round(toplam);
       let tablet = anaTablet >= 0 ? s[anaTablet] : null;
       if ((tablet == null || tablet === '') && dTablet >= 0) {
         const d = ilkKayit.get(kodMetni(s[anaKod]));
@@ -282,7 +282,10 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
       while (yeni.length < anaBasliklar.length) yeni.push(null);
       const d = ilkKayit.get(kodMetni(s[anaKod]));
       if (d) {
-        if (aboneSutun >= ana.basliklar.length && dAbone >= 0) yeni[aboneSutun] = sayi(d[dAbone]);
+        if (aboneSutun >= ana.basliklar.length && dAbone >= 0) {
+          const v = sayi(d[dAbone]);
+          yeni[aboneSutun] = v == null ? null : Math.round(v);
+        }
         if (tabletSutun >= ana.basliklar.length && dTablet >= 0) yeni[tabletSutun] = d[dTablet];
       }
       return yeni;

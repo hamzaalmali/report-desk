@@ -640,7 +640,7 @@ async function main() {
         'DİĞER OG (9E)', 'DİĞER AG (9F)', 'GEREKSİZ (10)', 'GEREKSİZ (11)'],
       [5004, 1, 'BURSA', 'NİLÜFER', 'SCADA-MANEVRA', '2,5', 40, null, null, null, null, null, 'çöp', 'çöp'],
       [5001, 1, 'BURSA', 'KESTEL', 'OG HAT BAKIM', 10.4, 1000, 500, 0, 0, 0, 0, 'çöp', 'çöp'],
-      [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5', '1.000', 250, null, null, null, null, 'çöp', 'çöp'],
+      [5002, 1, 'BURSA', 'GÜRSU', 'AG ABONE KABLOSU', '0,5', '1.000', '249,6', null, null, null, null, 'çöp', 'çöp'],
       [5003, 1, 'YALOVA', 'MERKEZ', 'KUŞ ÇARPMASI', 6, 0, 0, 1000, 0, 0, 0, 'çöp', 'çöp'],
     ]);
 
@@ -694,7 +694,7 @@ async function main() {
       anaBaslik[6] === 'Toplam Abone' && anaBaslik[7] === 'TABLET AÇIKLAMASI'
       && ana.ws.getRow(1).cellCount <= 8,
       anaBaslik.join(' | '));
-    kontrol('Toplam Abone 9A–9F toplamı, tablet detaydan koda göre',
+    kontrol('Toplam Abone 9A–9F toplamı ve küsuratsız, tablet detaydan koda göre',
       ana.satirlar.length === 4
       && ana.satirlar[0][0] === 5004 && ana.satirlar[0][6] === 40 && ana.satirlar[0][7] === 'osos notu'
       && ana.satirlar[1][6] === 1500 && ana.satirlar[1][7] === 'not-1'
@@ -746,6 +746,29 @@ async function main() {
       JSON.stringify(ters.ozet));
 
     fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
+  console.log('\nTablo kuyruğu');
+  {
+    const kuyruk = require('../src/main/tablo/kuyruk');
+    const k = kuyruk.olustur();
+    kontrol('iş başlamadan bekleyen eklenmiyor', k.ekle('a') === false && !k.calisiyorMu());
+    k.basla();
+    kontrol('çalışırken bekleyenler yinelemesiz toplanıyor',
+      k.calisiyorMu() && k.ekle('a') && k.ekle('b') && k.ekle('a')
+      && k.bekleyenSayisi() === 2);
+    const teslim = [];
+    const d1 = await k.bitir(async (s) => {
+      if (s === 'b') throw new Error('ulaşılamadı');
+      teslim.push(s);
+    });
+    kontrol('bitince herkese teslim deneniyor, biri hata verse de diğeri alıyor',
+      d1.toplam === 2 && d1.ulasan === 1 && d1.hatalar.length === 1
+      && d1.hatalar[0].sohbet === 'b' && teslim.join('') === 'a',
+      JSON.stringify(d1));
+    kontrol('teslimden sonra kuyruk kapanıyor', !k.calisiyorMu() && k.ekle('c') === false);
+    const d2 = await k.bitir(() => { });
+    kontrol('boş kuyruğu bitirmek sorun çıkarmıyor', d2.toplam === 0 && d2.ulasan === 0);
   }
 
   console.log('\nE-posta');
