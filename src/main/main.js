@@ -20,8 +20,12 @@ const portal = require('./portal/portal');
 const portalAyar = require('./portal/ayar');
 const githubKayit = require('./portal/githubKayit');
 const kesintiTablosu = require('./tablo/kesintiTablosu');
+const binaTipiOsos = require('./tablo/binaTipiOsos');
+const servisIndir = require('./portal/servisIndir');
 const kuyruk = require('./tablo/kuyruk');
 const posta = require('./posta/posta');
+const mail = require('./mail/mail');
+const mailAyar = require('./mail/ayar');
 const kasa = require('./portal/kasa');
 const sahiplik = require('./whatsapp/sahiplik');
 const senkron = require('./senkron/senkron');
@@ -428,7 +432,11 @@ function waKur() {
       izinliler: () => izinliNumaralar(),
       log: kayit,
       ekIzin: (numara) => portalHesabiVar(numara),
-      servisler: { rapor: (b) => waRaporKomutu(b), tablo: (b) => waTabloKomutu(b) },
+      servisler: {
+        rapor: (b) => waRaporKomutu(b),
+        tablo: (b) => waIsKomutu(ISLER.tablo, b),
+        bina: (b) => waIsKomutu(ISLER.bina, b),
+      },
     }),
     kayit
   );
@@ -655,11 +663,88 @@ async function tabloyuHazirla({ numara, onayKodu, ilerleme }) {
   return { sonuc, tablo };
 }
 
+async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
+  const ayarlar = portalAyarlari();
+  const eksik = portalAyar.dogrulaBina(ayarlar);
+  if (eksik.length) {
+    throw new Error(`BİNA TİPİ OSOS için portal ayarları eksik: ${eksik.join(', ')}. `
+      + 'Ayarlar → Rapor portalı kartına üç rapor adını ve OSOS servisi adresini yazın.');
+  }
+
+  const sonuc = await portaliCalistir({
+    numara,
+    onayKodu,
+    ilerleme,
+    raporlar: [ayarlar.binaRapor1, ayarlar.binaRapor2, ayarlar.binaRapor3],
+  });
+
+  const [ihbar, formDetay, baglanti] = sonuc.dosyalar || [];
+  if (!ihbar || !ihbar.dosya) throw new Error('AYS İhbar Takip raporu indirilemedi.');
+  if (!formDetay || !formDetay.dosya) throw new Error('AYS Kesintiler Form Detay raporu indirilemedi.');
+  if (!baglanti || !baglanti.dosya) throw new Error('AYS Osos Bağlanma Oran raporu indirilemedi.');
+
+  const osos = await servisIndir.indir({
+    url: ayarlar.ososUrl,
+    dugme: ayarlar.ososDugme,
+    klasor: sonuc.klasor,
+    aralik: sonuc.aralik,
+    sayfaMs: (ayarlar.sayfaSn || 180) * 1000,
+    gorunur: ayarlar.gorunur,
+    kapat: true,
+    log: kayit,
+  });
+
+  const tablo = await binaTipiOsos.olustur({
+    ihbarDosya: ihbar.dosya,
+    ososDosya: osos.dosya,
+    formDetayDosya: formDetay.dosya,
+    baglantiDosya: baglanti.dosya,
+    hedefKlasor: sonuc.klasor,
+    tarihMetni: sonuc.aralik.bas,
+    bitisTarihi: sonuc.aralik.son,
+    log: kayit,
+  });
+  return { sonuc, tablo };
+}
+
 function tabloOzetMetni(tablo) {
   const o = tablo.ozet;
   return `Kesinti: ${o.toplam} · 6 saat ve üzeri: ${o.altiSaat} · `
     + `1000+ abone: ${o.binAbone} · 2+ ilçe: ${o.ikiIlce} · Rekortman: ${o.rekortman}`;
 }
+
+function binaOzetMetni(tablo) {
+  const o = tablo.ozet;
+  return `OSOS ihbarı: ${o.ihbar} (ham ${o.ihbarHam}) · osos_rapor'da yok: ${o.ososYok} · `
+    + `kesinti kaydı yok: ${o.kesintiYok} · Bağlantı satırı: ${o.baglanti} `
+    + `(%100: ${o.tamOran}, kapsam dışı: ${o.kapsamDisi}, ertesi gün: ${o.sonrakiGun})`;
+}
+
+const ISLER = {
+  tablo: {
+    kod: 'tablo',
+    ad: 'Tablo',
+    raporSayisi: 2,
+    kuyruk: kuyruk.olustur(),
+    hazirla: tabloyuHazirla,
+    ozetMetni: tabloOzetMetni,
+    dogrula: (a) => portalAyar.dogrulaTablo(a),
+    eksikNotu: 'Ayarlar → Rapor portalı kartına iki rapor adını yazın.',
+    baslangic: 'Portala giriliyor — tablo için iki rapor indirilecek…',
+  },
+  bina: {
+    kod: 'bina',
+    ad: 'BİNA TİPİ OSOS',
+    raporSayisi: 3,
+    kuyruk: kuyruk.olustur(),
+    hazirla: binaTablosuHazirla,
+    ozetMetni: binaOzetMetni,
+    dogrula: (a) => portalAyar.dogrulaBina(a),
+    eksikNotu: 'Ayarlar → Rapor portalı kartına üç rapor adını ve OSOS servisi adresini yazın.',
+    baslangic: 'Portala giriliyor — BİNA TİPİ OSOS için üç rapor ve OSOS servisi dosyası '
+      + 'indirilecek…',
+  },
+};
 
 function postaSifresi() {
   const sifreli = db.ortakAyarOku('postaSifre');
@@ -667,7 +752,7 @@ function postaSifresi() {
   return kasa.coz(sifreli, db.ortakAyarOku('postaSifreSema'));
 }
 
-async function tabloyuPostala(tablo, aralik) {
+async function tabloyuPostala(is, tablo, aralik) {
   const ayar = posta.oku(db);
   if (!ayar.tabloGonder || !posta.hazirMi(ayar)) return null;
   try {
@@ -675,70 +760,72 @@ async function tabloyuPostala(tablo, aralik) {
       ayar,
       sifre: postaSifresi(),
       konu: tablo.ad.replace(/\.xlsx$/i, ''),
-      metin: `Tarih: ${aralik.bas} – ${aralik.son} (${aralik.saat})\n${tabloOzetMetni(tablo)}\n\n`
+      metin: `Tarih: ${aralik.bas} – ${aralik.son} (${aralik.saat})\n${is.ozetMetni(tablo)}\n\n`
         + 'Bu ileti Report Desk tarafından gönderildi.',
       dosyalar: [{ dosya: tablo.dosya, ad: tablo.ad }],
     });
-    db.logYaz(null, 'e-posta', `Kesinti tablosu e-postayla gönderildi → ${alicilar.length} alıcı`);
+    db.logYaz(null, 'e-posta', `${is.ad} e-postayla gönderildi → ${alicilar.length} alıcı`);
     return { ok: true, alici: alicilar.length };
   } catch (e) {
-    kayit(`Kesinti tablosu e-postayla gönderilemedi: ${e.message}`);
-    db.logYaz(null, 'e-posta', `Kesinti tablosu e-postayla gönderilemedi: ${e.message}`);
+    kayit(`${is.ad} e-postayla gönderilemedi: ${e.message}`);
+    db.logYaz(null, 'e-posta', `${is.ad} e-postayla gönderilemedi: ${e.message}`);
     return { ok: false, hata: e.message };
   }
 }
 
-const tabloKuyrugu = kuyruk.olustur();
-
-async function tabloyuHazirlaDenemeli(secenekler, haber = () => { }) {
+async function isiHazirlaDenemeli(is, secenekler, haber = () => { }) {
   try {
-    return await tabloyuHazirla(secenekler);
+    return await is.hazirla(secenekler);
   } catch (e) {
     const mesaj = e.message || '';
     if (/durduruldu/i.test(mesaj) || /ayarları eksik/i.test(mesaj)) throw e;
-    kayit(`Tablo ilk denemede başarısız: ${mesaj} — baştan yeniden deneniyor.`);
-    db.logYaz(null, 'portal', `Tablo ilk denemede başarısız (${mesaj}), yeniden deneniyor`);
+    kayit(`${is.ad} ilk denemede başarısız: ${mesaj} — baştan yeniden deneniyor.`);
+    db.logYaz(null, 'portal', `${is.ad} ilk denemede başarısız (${mesaj}), yeniden deneniyor`);
     haber(`Tarayıcı hata verdi: ${mesaj}\nBaştan bir kez daha deneniyor…`);
-    return tabloyuHazirla(secenekler);
+    return is.hazirla(secenekler);
   }
 }
 
-async function tabloKuyrugunaDagit(icerik) {
-  const dagitim = await tabloKuyrugu.bitir(async (sohbet) => {
+async function kuyrugaDagit(is, icerik) {
+  const dagitim = await is.kuyruk.bitir(async (sohbet) => {
     if (icerik.dosya) await wa.belgeGonder(sohbet, icerik.dosya, icerik.ad, icerik.baslik);
     else await wa.gonder(sohbet, icerik.metin);
   });
   if (dagitim.toplam) {
     db.logYaz(null, 'portal',
-      `Tabloyu bekleyen ${dagitim.toplam} sohbetten ${dagitim.ulasan} tanesine iletildi`);
+      `${is.ad} bekleyen ${dagitim.toplam} sohbetten ${dagitim.ulasan} tanesine iletildi`);
   }
   for (const h of dagitim.hatalar) {
-    kayit(`Tabloyu bekleyen sohbete iletilemedi (${h.sohbet}): ${h.hata}`);
+    kayit(`${is.ad} bekleyen sohbete iletilemedi (${h.sohbet}): ${h.hata}`);
   }
   return dagitim;
 }
 
-async function waTabloKomutu(b) {
-  if (tabloKuyrugu.calisiyorMu()) {
-    tabloKuyrugu.ekle(b.sohbet);
-    return 'Tablo şu an zaten hazırlanıyor — bitince size de gönderilecek.';
+function raporSirasi(kod) {
+  const m = String(kod || '').match(/-r(\d+)$/);
+  return m ? Number(m[1]) : 1;
+}
+
+async function waIsKomutu(is, b) {
+  if (is.kuyruk.calisiyorMu()) {
+    is.kuyruk.ekle(b.sohbet);
+    return `${is.ad} şu an zaten hazırlanıyor — bitince size de gönderilecek.`;
   }
   if (portal.durumAl().calisiyor) return 'Portal işlemi hâlihazırda çalışıyor, bitince yeniden yazın.';
 
   const ayarlar = portalAyarlari();
-  const eksik = portalAyar.dogrulaTablo(ayarlar);
+  const eksik = is.dogrula(ayarlar);
   if (eksik.length) {
-    return `Tablo için portal ayarları eksik: ${eksik.join(', ')}.\n`
-      + 'Ayarlar → Rapor portalı kartına iki rapor adını yazın.';
+    return `${is.ad} için portal ayarları eksik: ${eksik.join(', ')}.\n${is.eksikNotu}`;
   }
 
-  tabloKuyrugu.basla();
-  await b.gonder('Portala giriliyor — tablo için iki rapor indirilecek…');
+  is.kuyruk.basla();
+  await b.gonder(is.baslangic);
   const haber = (metin) => { b.gonder(metin).catch(() => { }); };
 
   let hazir = null;
   try {
-    hazir = await tabloyuHazirlaDenemeli({
+    hazir = await isiHazirlaDenemeli(is, {
       numara: b.gonderen,
       onayKodu: async (deneme, sonHata) => {
         const soru = (sonHata ? `${sonHata}\n\n` : '')
@@ -748,43 +835,67 @@ async function waTabloKomutu(b) {
       },
       ilerleme: (o) => {
         if (o.kod && o.kod.startsWith('rapor-kaydet') && o.durum === 'bitti') {
-          const hangisi = o.kod === 'rapor-kaydet' ? '1. rapor' : '2. rapor';
-          haber(`${hangisi} kuyruğa alındı, hazırlanması bekleniyor `
-            + `(her ${ayarlar.yenilemeSn} saniyede bir bakılacak).`);
+          haber(`${raporSirasi(o.kod)}/${is.raporSayisi} rapor kuyruğa alındı, hazırlanması `
+            + `bekleniyor (her ${ayarlar.yenilemeSn} saniyede bir bakılacak).`);
         }
       },
     }, haber);
   } catch (e) {
-    await tabloKuyrugunaDagit({ metin: `Tablo hazırlanamadı: ${e.message}` });
+    await kuyrugaDagit(is, { metin: `${is.ad} hazırlanamadı: ${e.message}` });
     throw e;
   } finally {
     wa.soruDusur(b.gonderen);
   }
 
   const { sonuc, tablo } = hazir;
-  db.logYaz(null, 'portal', `WhatsApp tablo isteği (${b.gonderen}) → ${tablo.ad}`);
+  db.logYaz(null, 'portal', `WhatsApp ${is.kod} isteği (${b.gonderen}) → ${tablo.ad}`);
 
-  const postaSonucu = await tabloyuPostala(tablo, sonuc.aralik);
+  const postaSonucu = await tabloyuPostala(is, tablo, sonuc.aralik);
   const postaNotu = !postaSonucu ? ''
     : (postaSonucu.ok
       ? `\nE-postayla da gönderildi (${postaSonucu.alici} alıcı).`
       : `\nE-posta gönderilemedi: ${postaSonucu.hata}`);
 
   const baslik = `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
-    + tabloOzetMetni(tablo) + postaNotu;
+    + is.ozetMetni(tablo) + postaNotu;
   let gonderimHatasi = null;
   try {
     await wa.belgeGonder(b.sohbet, tablo.dosya, tablo.ad, baslik);
   } catch (e) {
     gonderimHatasi = e;
-    kayit(`Tablo dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
+    kayit(`${is.ad} dosyası WhatsApp'tan gönderilemedi: ${e.message}`);
   }
-  await tabloKuyrugunaDagit({ dosya: tablo.dosya, ad: tablo.ad, baslik });
+  await kuyrugaDagit(is, { dosya: tablo.dosya, ad: tablo.ad, baslik });
   if (gonderimHatasi) {
-    return `Tablo hazırlandı ama dosya gönderilemedi: ${gonderimHatasi.message}\n\n`
+    return `${is.ad} hazırlandı ama dosya gönderilemedi: ${gonderimHatasi.message}\n\n`
       + `Dosya: ${tablo.ad}\nKlasör: ${sonuc.klasor}${postaNotu}`;
   }
   return null;
+}
+
+async function isiElleCalistir(is, numara) {
+  if (is.kuyruk.calisiyorMu()) throw new Error(`${is.ad} şu an zaten hazırlanıyor.`);
+  is.kuyruk.basla();
+  let hazir = null;
+  try {
+    hazir = await isiHazirlaDenemeli(is, { numara, onayKodu: uiOnayIste });
+  } catch (e) {
+    await kuyrugaDagit(is, { metin: `${is.ad} hazırlanamadı: ${e.message}` });
+    throw e;
+  }
+  const { sonuc, tablo } = hazir;
+  db.logYaz(null, 'portal', `${is.ad} elle hazırlandı (${numara}) → ${tablo.ad}`);
+  const postaSonucu = await tabloyuPostala(is, tablo, sonuc.aralik);
+  await kuyrugaDagit(is, {
+    dosya: tablo.dosya,
+    ad: tablo.ad,
+    baslik: `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
+      + is.ozetMetni(tablo),
+  });
+  return {
+    dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet,
+    posta: postaSonucu,
+  };
 }
 
 const KILITSIZ = new Set([
@@ -1292,30 +1403,9 @@ kanal('portalCalistir', async (numara) => {
   return sonuc;
 });
 
-kanal('tabloCalistir', async (numara) => {
-  if (tabloKuyrugu.calisiyorMu()) throw new Error('Tablo şu an zaten hazırlanıyor.');
-  tabloKuyrugu.basla();
-  let hazir = null;
-  try {
-    hazir = await tabloyuHazirlaDenemeli({ numara, onayKodu: uiOnayIste });
-  } catch (e) {
-    await tabloKuyrugunaDagit({ metin: `Tablo hazırlanamadı: ${e.message}` });
-    throw e;
-  }
-  const { sonuc, tablo } = hazir;
-  db.logYaz(null, 'portal', `Tablo elle hazırlandı (${numara}) → ${tablo.ad}`);
-  const postaSonucu = await tabloyuPostala(tablo, sonuc.aralik);
-  await tabloKuyrugunaDagit({
-    dosya: tablo.dosya,
-    ad: tablo.ad,
-    baslik: `Tarih: ${sonuc.aralik.bas} – ${sonuc.aralik.son} (${sonuc.aralik.saat})\n`
-      + tabloOzetMetni(tablo),
-  });
-  return {
-    dosya: tablo.dosya, dosyaAdi: tablo.ad, klasor: sonuc.klasor, ozet: tablo.ozet,
-    posta: postaSonucu,
-  };
-});
+kanal('tabloCalistir', (numara) => isiElleCalistir(ISLER.tablo, numara));
+
+kanal('binaCalistir', (numara) => isiElleCalistir(ISLER.bina, numara));
 
 kanal('postaAyar', () => ({
   ...posta.oku(db),
@@ -1352,6 +1442,107 @@ kanal('postaSinama', async () => {
   });
   db.logYaz(null, 'e-posta', `Sınama iletisi gönderildi → ${alicilar.length} alıcı`);
   return { alici: alicilar.length };
+});
+
+function mailSifresi() {
+  const sifreli = db.ortakAyarOku('mailSifre');
+  if (!sifreli) return '';
+  return kasa.coz(sifreli, db.ortakAyarOku('mailSifreSema'));
+}
+
+function mailAyarlari() {
+  const a = mailAyar.oku(db);
+  if (!a.yedekKlasor) a.yedekKlasor = path.join(app.getPath('documents'), 'Gmail yedegi');
+  return a;
+}
+
+function mailDurumu() {
+  const a = mailAyarlari();
+  const sifreVar = !!db.ortakAyarOku('mailSifre');
+  return {
+    ...a,
+    sifreVar,
+    kasaVar: kasa.kullanilabilir(),
+    eksik: mailAyar.dogrula(a, sifreVar),
+    silmeEksik: mailAyar.silmeyeHazir(a, sifreVar),
+  };
+}
+
+kanal('mailAyar', () => mailDurumu());
+
+kanal('mailAyarYaz', (gelen) => {
+  const veri = { ...(gelen || {}) };
+  if (Object.prototype.hasOwnProperty.call(veri, 'sifre')) {
+    const sifre = String(veri.sifre || '').replace(/\s+/g, '');
+    delete veri.sifre;
+    if (sifre) {
+      const k = kasa.sifrele(sifre);
+      db.ortakAyarYaz('mailSifre', k.deger);
+      db.ortakAyarYaz('mailSifreSema', String(k.sifreli));
+    }
+  }
+  mailAyar.yaz(db, veri);
+  return mailDurumu();
+});
+
+kanal('mailYedekSec', async () => {
+  const r = await dialog.showOpenDialog(pencere, {
+    title: 'Postaların yedekleneceği klasörü seçin',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (r.canceled) return null;
+  mailAyar.yaz(db, { yedekKlasor: r.filePaths[0] });
+  return mailDurumu();
+});
+
+kanal('mailYedekAc', () => {
+  const kok = mailAyarlari().yedekKlasor;
+  fs.mkdirSync(kok, { recursive: true });
+  shell.openPath(kok);
+  return kok;
+});
+
+kanal('mailKlasorler', async () => {
+  const ayar = mailAyarlari();
+  const eksik = mailAyar.dogrula(ayar, !!db.ortakAyarOku('mailSifre'));
+  if (eksik.length) throw new Error(`Mail ayarları eksik: ${eksik.join(', ')}.`);
+  return mail.klasorler({ ayar, sifre: mailSifresi() });
+});
+
+kanal('mailOzet', async (istek) => {
+  const ayar = mailAyarlari();
+  const eksik = mailAyar.dogrula(ayar, !!db.ortakAyarOku('mailSifre'));
+  if (eksik.length) throw new Error(`Mail ayarları eksik: ${eksik.join(', ')}.`);
+  return mail.ozet({
+    ayar,
+    sifre: mailSifresi(),
+    klasor: (istek && istek.klasor) || ayar.klasor,
+    tarih: istek && istek.tarih,
+  });
+});
+
+kanal('mailSil', async (istek) => {
+  const ayar = mailAyarlari();
+  const eksik = mailAyar.silmeyeHazir(ayar, !!db.ortakAyarOku('mailSifre'));
+  if (eksik.length) throw new Error(`Mail ayarları eksik: ${eksik.join(', ')}.`);
+  const klasor = (istek && istek.klasor) || ayar.klasor;
+  const kalici = !istek || istek.kalici !== false;
+  const sonuc = await mail.temizle({
+    ayar,
+    sifre: mailSifresi(),
+    klasor,
+    tarih: istek && istek.tarih,
+    yedekKok: ayar.yedekKlasor,
+    kalici,
+    log: kayit,
+    ilerleme: (o) => {
+      if (pencere && !pencere.isDestroyed()) pencere.webContents.send('mailIlerleme', o);
+    },
+  });
+  db.logYaz(null, 'mail', `${klasor}: ${sonuc.sinir} öncesi ${sonuc.silinen} posta `
+    + `${sonuc.kalici ? 'kalıcı silindi' : 'çöp kutusuna taşındı'}, `
+    + `${sonuc.yedeklenen} posta yedeklendi`);
+  return sonuc;
 });
 
 kanal('kilitDurum', () => kilit.durumAl(), true);

@@ -8,6 +8,11 @@ const ALANLAR = [
   { anahtar: 'portalRaporAdi', ad: 'raporAdi', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalTabloRapor1', ad: 'tabloRapor1', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalTabloRapor2', ad: 'tabloRapor2', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalBinaRapor1', ad: 'binaRapor1', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalBinaRapor2', ad: 'binaRapor2', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalBinaRapor3', ad: 'binaRapor3', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalOsosUrl', ad: 'ososUrl', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalOsosDugme', ad: 'ososDugme', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalSaat', ad: 'saat', tur: 'metin', varsayilan: '01:00' },
   {
     anahtar: 'portalMenuXpath',
@@ -89,6 +94,16 @@ function dogrula(a) {
   return eksik;
 }
 
+function dogrulaBina(a) {
+  const eksik = [];
+  if (!a.girisUrl) eksik.push('giriş adresi');
+  if (!a.binaRapor1) eksik.push('bina raporu 1 (AYS İhbar Takip)');
+  if (!a.binaRapor2) eksik.push('bina raporu 2 (AYS Kesintiler Form Detay)');
+  if (!a.binaRapor3) eksik.push('bina raporu 3 (AYS Osos Bağlanma Oran)');
+  if (!a.ososUrl) eksik.push('OSOS servisi adresi');
+  return eksik;
+}
+
 function dogrulaTablo(a) {
   const eksik = [];
   if (!a.girisUrl) eksik.push('giriş adresi');
@@ -97,4 +112,6 @@ function dogrulaTablo(a) {
   return eksik;
 }
 
-module.exports = { oku, yaz, dogrula, dogrulaTablo, varsayilanAna, ALANLAR, ESKIYEN };
+module.exports = {
+  oku, yaz, dogrula, dogrulaTablo, dogrulaBina, varsayilanAna, ALANLAR, ESKIYEN,
+};

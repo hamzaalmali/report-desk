@@ -748,6 +748,447 @@ async function main() {
     fs.rmSync(klasor, { recursive: true, force: true });
   }
 
+  console.log('\nBİNA TİPİ OSOS tablosu');
+  {
+    const ExcelJS = require('exceljs');
+    const bina = require('../src/main/tablo/binaTipiOsos');
+    const servisIndir = require('../src/main/portal/servisIndir');
+
+    kontrol('gün metni üç biçimden de çıkıyor',
+      bina.gunMetni('11.08.2026 06:50:48') === '11.08.2026'
+      && bina.gunMetni(new Date(Date.UTC(2026, 7, 11, 21, 30))) === '11.08.2026'
+      && bina.gunMetni('2026-08-11T09:24:23.000Z') === '11.08.2026'
+      && bina.gunMetni('') === '',
+      [bina.gunMetni('11.08.2026 06:50:48'), bina.gunMetni('2026-08-11T09:24:23.000Z')].join(' | '));
+
+    kontrol('servis adresindeki tarih yer tutucuları doluyor',
+      servisIndir.adresiCoz('http://sunucu/osos?g={tarih}&s={son}',
+        { bas: '11.08.2026', son: '12.08.2026' }) === 'http://sunucu/osos?g=11.08.2026&s=12.08.2026'
+      && servisIndir.adresiCoz('http://sunucu/osos', null) === 'http://sunucu/osos');
+
+    const klasor = fs.mkdtempSync(path.join(os.tmpdir(), 'bina-osos-'));
+    const yazDosya = async (yol, sayfaAdi, satirlar) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(sayfaAdi);
+      for (const s of satirlar) ws.addRow(s);
+      await wb.xlsx.writeFile(yol);
+    };
+
+    const ihbarYol = path.join(klasor, 'ihbar.xlsx');
+    const ososYol = path.join(klasor, 'osos_rapor.xlsx');
+    const formYol = path.join(klasor, 'formdetay.xlsx');
+    const baglantiYol = path.join(klasor, 'baglanma.xlsx');
+
+    // Ham AYS İhbar Takip: iki satır ön blok, B ve E formüllü, Q'da ihbar detayı.
+    const bosluk = (n) => Array.from({ length: n }, () => null);
+    await yazDosya(ihbarYol, 'AYS_IhbarTakip', [
+      ['AYS İhbar Takip Raporu'],
+      ['BASTARIH=11.08.2026', 'SONTARIH=12.08.2026'],
+      ['İhbar No', 'Talep No', 'Bildiren', 'Kanal', 'Kesinti No', 'Müdürlük', 'İl Adı',
+        'İlçe Adı', 'Mahalle Adı', 'Köy Adı', 'Durum', 'Öncelik', 'Ekip', 'Not', 'Sonuç',
+        'Kod', 'İhbar Detay', 'İhbar Tarihi', 'Enerji Alma Zamanı'],
+      [9001, { formula: 'X1', result: 4001 }, 'OSOS', 'Otomatik',
+        { formula: 'Y1', result: 7001 }, 'BURSA', 'BURSA', 'NİLÜFER',
+        'ÇEKİRGE', null, 'Kapandı', 1, 'EKİP-1', '', '', 'K1',
+        'OSOS Ihbar Olusturma', '11.08.2026 09:24:23', '11.08.2026 17:10:48'],
+      [9002, { formula: 'X2', result: '4002' }, 'OSOS', 'Otomatik',
+        { formula: 'Y2', result: '7099' }, 'KESTEL', 'BURSA', 'KESTEL',
+        'BARAKFAKİH', null, 'Kapandı', 1, 'EKİP-2', '', '', 'K2',
+        'OSOS Ihbar Olusturma', '11.08.2026 01:55:47', '11.08.2026 01:56:16'],
+      [9003, 4004, 'MÜŞTERİ', 'Çağrı', 7001, 'KESTEL', 'BURSA', 'KESTEL',
+        'YALI', null, 'Kapandı', 2, 'EKİP-3', '', '', 'K3',
+        'Musteri Ihbari', '11.08.2026 06:19:22', '11.08.2026 06:19:52'],
+      [9004, 4003, 'OSOS', 'Otomatik', 7002, 'GÜRSU', 'YALOVA', 'MERKEZ',
+        'MERKEZ', null, 'Kapandı', 1, 'EKİP-4', '', '', 'K4',
+        'OSOS Ihbar Olusturma', '11.08.2026 11:44:03', '11.08.2026 12:42:26'],
+    ]);
+
+    await yazDosya(ososYol, 'osos_rapor', [
+      ['SIRA', 'KAYIT', 'TALEP NO', 'ADI', 'BOS1', 'BOS2', 'TIPI', 'FONKSIYON', 'BOS3',
+        'ISLETME', 'BOS4', 'BOS5', 'MULKIYET'],
+      [1, 'K-1', 4001, 'DM-DENEME', '', '', 'BINA', 'DAGITIM', '',
+        'BURSA', '', '', 'SIRKET'],
+      [2, 'K-2', '4002', 'TR-1', '', '', 'KOSK', 'DAGITIM', '',
+        'KESTEL', '', '', 'MUSTERI'],
+    ]);
+
+    // Ham AYS Kesintiler Form Detay: 14 satır ön blok, A sütunu boş.
+    await yazDosya(formYol, 'FormDetay', [
+      ...Array.from({ length: 14 }, (_, i) => [null, `ön blok ${i + 1}`]),
+      [null, 'KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)', 'KESİNTİ SÜRESİ'],
+      [null, 7001, 1, 'BURSA', 'NİLÜFER', 2.5],
+      [null, 7002, 1, 'YALOVA', 'MERKEZ', 1.2],
+    ]);
+
+    // Ham bağlanma oranı raporu: 4 satır ön blok, listede olmayan bir sütun (J) var.
+    await yazDosya(baglantiYol, 'BaglanmaOrani', [
+      ...Array.from({ length: 4 }, (_, i) => [`ön blok ${i + 1}`]),
+      ['KESINTI NO', 'ENERJİLENEN KAYNAK', 'ENERJİLENEN HAT', 'İL', 'İLÇE', 'MÜDÜRLÜK',
+        'GERİLİM SEVİYESİ', 'SÜREYE GÖRE', 'BİLDİRİM DURUMU', 'BİLDİRİM TİPİ',
+        'KESINTI BASLANGIC ZAMANI', 'KESINTI BITIS ZAMANI', 'KESINTI SÜRESİ',
+        'ENERJILENEN TRAFO SAYISI', 'ENERJILENEN BINA TIPI TRAFO SAYISI',
+        'BAĞLANAN BINA TIPI TRAFO SAYISI',
+        'TSUİS KAPSAMINDA BAĞLANMASI GEREKEN TRAFO SAYISI',
+        'TSUİS KAPSAMINDA BAĞLANAN TRAFO SAYISI', 'TSUİS BAĞLANMA ORANI',
+        'BAĞLANMAYAN BİNA TİPİ TRAFOLAR'],
+      [7001, 1101, 2201, 'YALOVA', 'MERKEZ', 'GÜRSU', 'Dağıtım-OG', 'UZUN',
+        'BILDIRIMSIZ', 'atılacak-1', '11.08.2026 06:50:48', '11.08.2026 06:54:17', 209,
+        22, 8, 0, 7, 0, 0, ' 5001, 5002'],
+      [7002, 1102, 2202, 'YALOVA', 'MERKEZ', 'GÜRSU', 'Dağıtım-OG', 'UZUN',
+        'BILDIRIMSIZ', 'atılacak-2', '11.08.2026 11:44:03', '11.08.2026 12:42:26', 3503,
+        1, 1, 1, 1, 1, 100, ''],
+      [7003, 1103, 2203, 'YALOVA', 'MERKEZ', 'GÜRSU', 'Dağıtım-OG', 'UZUN',
+        'BILDIRIMSIZ', 'atılacak-3', '11.08.2026 13:28:44', '11.08.2026 15:03:23', 5679,
+        1, 1, 0, 0, 0, 'TSUİS Kapsamında Değil', ' 5002'],
+      [7004, 1104, 2204, 'YALOVA', 'BANDIRMA', 'BANDIRMA', 'Dağıtım-OG', 'UZUN',
+        'BILDIRIMLI', 'atılacak-4', '12.08.2026 09:12:40', '12.08.2026 15:50:31', 23872,
+        1, 1, 0, 1, 0, 0, ' 5003'],
+      [7005, 1105, 2205, 'BURSA', 'KESTEL', 'KESTEL', 'Dağıtım-OG', 'KISA',
+        'BILDIRIMSIZ', 'atılacak-5', '11.08.2026 01:54:32', '11.08.2026 01:55:01', 29,
+        37, 3, 1, 3, 1, 33, ' 5004'],
+    ]);
+
+    const gunluk = [];
+    const sonuc = await bina.olustur({
+      ihbarDosya: ihbarYol,
+      ososDosya: ososYol,
+      formDetayDosya: formYol,
+      baglantiDosya: baglantiYol,
+      hedefKlasor: klasor,
+      tarihMetni: '11.08.2026',
+      bitisTarihi: '12.08.2026',
+      log: (m) => gunluk.push(m),
+    });
+
+    kontrol('çıktı dosyası tarihli adla yazıldı',
+      sonuc.ad === '11.08.2026 BİNA TİPİ OSOS.xlsx' && fs.existsSync(sonuc.dosya), sonuc.ad);
+    kontrol('özet sayıları doğru',
+      sonuc.ozet.ihbarHam === 4 && sonuc.ozet.ihbar === 3 && sonuc.ozet.ososYok === 1
+      && sonuc.ozet.kesintiYok === 1 && sonuc.ozet.baglantiHam === 5
+      && sonuc.ozet.baglanti === 2 && sonuc.ozet.tamOran === 1
+      && sonuc.ozet.kapsamDisi === 1 && sonuc.ozet.sonrakiGun === 1,
+      JSON.stringify(sonuc.ozet));
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(sonuc.dosya);
+    const adlar = wb.worksheets.map((w) => w.name);
+    kontrol('iki sayfa günlük aktarımın tanıdığı adlarla yazıldı',
+      adlar.join('|') === 'BİNA TİPİ|OSOS BAĞLANTI', adlar.join('|'));
+
+    const sayfaOku = (ad) => {
+      const ws = wb.getWorksheet(ad);
+      const n = ws.getRow(1).cellCount;
+      const al = (r) => Array.from({ length: n }, (_, i) => {
+        const v = ws.getRow(r).getCell(i + 1).value;
+        return v && typeof v === 'object' && v.result !== undefined ? v.result : v;
+      });
+      const satirlar = [];
+      for (let r = 2; r <= ws.actualRowCount; r++) satirlar.push(al(r));
+      return { ws, n, basliklar: al(1), satirlar };
+    };
+
+    const s1 = sayfaOku('BİNA TİPİ');
+    kontrol('1. sayfada Talep No sonrası beş sütun açıldı, kesinti kaydı sonda',
+      s1.basliklar.join('|') === 'İhbar No|Talep No|TRAFO ADI|TİPİ|FONKSİYON|İŞLETME|MÜLKİYET'
+      + '|Müdürlük|İl Adı|İlçe Adı|Mahalle Adı|Köy Adı|İhbar Detay|İhbar Tarihi'
+      + '|Enerji Alma Zamanı|Kesinti No|KESİNTİ KAYDI',
+      s1.basliklar.join('|'));
+    kontrol('yalnızca OSOS ihbarları kaldı',
+      s1.satirlar.length === 3
+      && s1.satirlar.every((r) => r[12] === 'OSOS Ihbar Olusturma'),
+      s1.satirlar.map((r) => r[12]).join(' | '));
+    kontrol('B ve E sütunları formülden sayıya çevrildi',
+      s1.satirlar[0][1] === 4001 && s1.satirlar[1][1] === 4002
+      && s1.satirlar[0][15] === 7001 && s1.satirlar[1][15] === 7099,
+      s1.satirlar.map((r) => `${typeof r[1]}:${r[1]}`).join(' '));
+    kontrol('osos_rapor sütunları talep numarasıyla geldi',
+      s1.satirlar[0][2] === 'DM-DENEME' && s1.satirlar[0][3] === 'BINA'
+      && s1.satirlar[0][4] === 'DAGITIM' && s1.satirlar[0][5] === 'BURSA'
+      && s1.satirlar[0][6] === 'SIRKET'
+      && s1.satirlar[1][2] === 'TR-1' && s1.satirlar[1][6] === 'MUSTERI',
+      s1.satirlar[0].slice(2, 7).join(' | '));
+    kontrol('osos_rapor’da olmayan talep boş bırakıldı',
+      s1.satirlar[2][2] == null && s1.satirlar[2][6] == null,
+      JSON.stringify(s1.satirlar[2].slice(2, 7)));
+    kontrol('kesinti kaydı form detaydan VAR/YOK yazıldı',
+      s1.satirlar[0][16] === 'VAR' && s1.satirlar[1][16] === 'YOK'
+      && s1.satirlar[2][16] === 'VAR',
+      s1.satirlar.map((r) => `${r[15]}:${r[16]}`).join(' '));
+
+    const s2 = sayfaOku('OSOS BAĞLANTI');
+    kontrol('2. sayfada listede olmayan sütun atıldı',
+      s2.n === 19 && !s2.basliklar.includes('BİLDİRİM TİPİ')
+      && s2.basliklar[9] === 'KESINTI BASLANGIC ZAMANI',
+      `${s2.n} sütun · ${s2.basliklar[9]}`);
+    kontrol('%100 oran, kapsam dışı ve bitiş günü satırları çıkarıldı',
+      s2.satirlar.map((r) => r[0]).join(',') === '7001,7005',
+      s2.satirlar.map((r) => `${r[0]}:${r[17]}`).join(' '));
+    kontrol('kalan satırlarda kenarlık ve süzgeç var',
+      !!s2.ws.autoFilter && !!s2.ws.getRow(2).getCell(1).border
+      && s2.ws.getRow(1).getCell(1).font.bold === true);
+    kontrol('üretilen sayfalar günlük aktarımda doğru kategoriye düşüyor',
+      (raporBul('BİNA TİPİ') || {}).kategori === 'BINA_TIPI_OSOS'
+      && (raporBul('OSOS BAĞLANTI') || {}).kategori === 'OSOS_BAGLANTI'
+      && (raporBulImza(s1.basliklar.map((b) => key(b))) || {}).kategori === 'BINA_TIPI_OSOS'
+      && (raporBulImza(s2.basliklar.map((b) => key(b))) || {}).kategori === 'OSOS_BAGLANTI',
+      [(raporBul('BİNA TİPİ') || {}).kategori, (raporBul('OSOS BAĞLANTI') || {}).kategori].join(' | '));
+
+    kontrol('atılan sütun günlüğe yazıldı',
+      gunluk.some((m) => m.includes('BİLDİRİM TİPİ')),
+      gunluk.filter((m) => m.includes('atıldı')).join(' / '));
+
+    fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
+  console.log('\nMail yedekleme ve temizleme');
+  {
+    const mail = require('../src/main/mail/mail');
+    const mailAyar = require('../src/main/mail/ayar');
+
+    kontrol('tarih metni yerel gün başına çevriliyor',
+      mail.gunAnahtari(mail.tarihCoz('2026-08-01')) === '2026-08-01'
+      && mail.tarihCoz('2026-08-01').getHours() === 0,
+      mail.tarihCoz('2026-08-01').toString());
+    kontrol('bozuk tarih hata veriyor',
+      (() => { try { mail.tarihCoz('abc'); return false; } catch { return true; } })());
+    kontrol('dosya adı tehlikeli karakterlerden arınıyor',
+      mail.dosyaAdiTemiz('Fatura /../ Ağustos: 2026?') === 'Fatura-..-Ağustos-2026'
+      && mail.dosyaAdiTemiz('') === 'adsiz',
+      mail.dosyaAdiTemiz('Fatura /../ Ağustos: 2026?'));
+    kontrol('csv hücresi tırnak ve satır sonu kaçırıyor',
+      mail.csvHucre('a"b\nc') === '"a""b c"', mail.csvHucre('a"b\nc'));
+
+    const COP = '[Gmail]/Çöp Kutusu';
+    const sahteIstemci = (iletiler) => {
+      const durum = { acilan: [], tasinan: [], silinen: [], cikis: false };
+      const istemci = {
+        durum,
+        mailbox: null,
+        async connect() { durum.baglandi = true; },
+        async logout() { durum.cikis = true; },
+        close() { },
+        async list() {
+          return [
+            { path: 'INBOX', name: 'INBOX', specialUse: null },
+            { path: COP, name: 'Çöp Kutusu', specialUse: '\\Trash' },
+          ];
+        },
+        async mailboxOpen(yol) {
+          durum.acilan.push(yol);
+          istemci.mailbox = { path: yol, exists: iletiler.length };
+          return istemci.mailbox;
+        },
+        async search(sorgu) {
+          durum.sorgu = sorgu;
+          return iletiler.filter((i) => i.tarih < sorgu.before).map((i) => i.uid);
+        },
+        async* fetch(uidler) {
+          for (const u of uidler) {
+            const i = iletiler.find((x) => x.uid === u);
+            if (!i) continue;
+            yield {
+              uid: i.uid,
+              size: i.icerik.length,
+              source: Buffer.from(i.icerik),
+              envelope: {
+                date: i.tarih,
+                from: [{ address: i.gonderen }],
+                subject: i.konu,
+              },
+            };
+          }
+        },
+        async messageMove(uidler, hedef) {
+          durum.tasinan.push({ uidler: [...uidler], hedef });
+          return { uidMap: new Map(uidler.map((u, ix) => [u, 900 + ix])) };
+        },
+        async messageDelete(uidler) {
+          durum.silinen.push({ uidler: [...uidler], kutu: istemci.mailbox.path });
+          return true;
+        },
+      };
+      return istemci;
+    };
+
+    const ayar = { sunucu: 'imap.gmail.com', port: 993, kullanici: 'ornek@gmail.com' };
+    const iletiler = [
+      { uid: 11, tarih: new Date(2024, 4, 3, 10), gonderen: 'a@x.com', konu: 'Eski fatura',
+        icerik: 'From: a@x.com\r\nSubject: Eski fatura\r\n\r\ngövde-1' },
+      { uid: 12, tarih: new Date(2025, 0, 9, 8), gonderen: 'b@x.com', konu: 'Bülten/Şubat',
+        icerik: 'From: b@x.com\r\nSubject: Bulten\r\n\r\ngövde-2' },
+      { uid: 13, tarih: new Date(2026, 7, 19, 12), gonderen: 'c@x.com', konu: 'Yeni',
+        icerik: 'From: c@x.com\r\nSubject: Yeni\r\n\r\ngövde-3' },
+    ];
+
+    const kok = fs.mkdtempSync(path.join(os.tmpdir(), 'mail-yedek-'));
+    let istemci = null;
+    const gunluk = [];
+    const ilerlemeler = [];
+    const sonuc = await mail.temizle({
+      ayar,
+      sifre: 'uygulama-sifresi',
+      klasor: 'INBOX',
+      tarih: '2026-01-01',
+      yedekKok: kok,
+      kalici: true,
+      uret: () => { istemci = sahteIstemci(iletiler); return istemci; },
+      log: (m) => gunluk.push(m),
+      ilerleme: (o) => ilerlemeler.push(o),
+    });
+
+    kontrol('yalnızca tarihten önceki postalar seçildi',
+      sonuc.toplam === 2 && sonuc.yedeklenen === 2 && sonuc.silinen === 2
+      && istemci.durum.sorgu.before instanceof Date,
+      JSON.stringify({ t: sonuc.toplam, y: sonuc.yedeklenen, s: sonuc.silinen }));
+
+    const yedekler = [];
+    const gez = (d) => {
+      for (const g of fs.readdirSync(d, { withFileTypes: true })) {
+        const y = path.join(d, g.name);
+        if (g.isDirectory()) gez(y); else yedekler.push(y);
+      }
+    };
+    gez(kok);
+    const emller = yedekler.filter((y) => y.endsWith('.eml'));
+    kontrol('her posta .eml olarak yıla göre klasörlendi',
+      emller.length === 2
+      && emller.some((y) => y.includes(path.join('ornek@gmail.com', 'INBOX', '2024'))
+        && path.basename(y).startsWith('2024-05-03_11_')),
+      emller.map((y) => path.relative(kok, y)).join(' | '));
+    kontrol('yedek içeriği postanın kendisi',
+      fs.readFileSync(emller.find((y) => y.includes('2024')), 'utf8') === iletiler[0].icerik);
+
+    const dizin = fs.readFileSync(path.join(kok, 'ornek@gmail.com', mail.DIZIN_ADI), 'utf8');
+    const dizinSatirlari = dizin.trim().split('\n');
+    kontrol('dizin dosyası başlık ve iki satır içeriyor',
+      dizinSatirlari.length === 3 && dizinSatirlari[0] === mail.DIZIN_BASLIK.trim()
+      && dizin.includes('"Eski fatura"') && dizin.includes('"Bülten/Şubat"'),
+      dizinSatirlari.join(' // '));
+
+    kontrol('kalıcı silme çöp kutusuna taşıyıp oradan expunge etti',
+      istemci.durum.tasinan.length === 1 && istemci.durum.tasinan[0].hedef === COP
+      && istemci.durum.silinen.length === 1 && istemci.durum.silinen[0].kutu === COP
+      && istemci.durum.silinen[0].uidler.join(',') === '900,901'
+      && istemci.durum.acilan[istemci.durum.acilan.length - 1] === 'INBOX',
+      JSON.stringify({ tasinan: istemci.durum.tasinan, silinen: istemci.durum.silinen }));
+    kontrol('iş bitince oturum kapatıldı', istemci.durum.cikis === true);
+    kontrol('ilerleme önce yedek sonra silme aşamasını bildirdi',
+      ilerlemeler[0].asama === 'yedek'
+      && ilerlemeler[ilerlemeler.length - 1].asama === 'sil',
+      ilerlemeler.map((o) => `${o.asama}:${o.biten}/${o.toplam}`).join(' '));
+
+    // Yedeklenemeyen posta silinmemeli.
+    const kok2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mail-yedek2-'));
+    const bozuk = [
+      iletiler[0],
+      { uid: 12, tarih: new Date(2025, 0, 9, 8), gonderen: 'b@x.com', konu: 'Boş', icerik: '' },
+    ];
+    let istemci2 = null;
+    const sonuc2 = await mail.temizle({
+      ayar,
+      sifre: 'x',
+      klasor: 'INBOX',
+      tarih: '2026-01-01',
+      yedekKok: kok2,
+      uret: () => { istemci2 = sahteIstemci(bozuk); return istemci2; },
+      log: () => { },
+    });
+    kontrol('yedeklenemeyen posta silinmiyor',
+      sonuc2.yedeklenen === 1 && sonuc2.silinen === 1 && sonuc2.atlanan.length === 1
+      && sonuc2.atlanan[0].uid === 12
+      && istemci2.durum.tasinan[0].uidler.join(',') === '11',
+      JSON.stringify(sonuc2.atlanan));
+
+    // Hiçbiri yedeklenemezse silme hiç yapılmamalı.
+    const kok3 = fs.mkdtempSync(path.join(os.tmpdir(), 'mail-yedek3-'));
+    let istemci3 = null;
+    let hata3 = null;
+    try {
+      await mail.temizle({
+        ayar,
+        sifre: 'x',
+        klasor: 'INBOX',
+        tarih: '2026-01-01',
+        yedekKok: kok3,
+        uret: () => { istemci3 = sahteIstemci([bozuk[1]]); return istemci3; },
+        log: () => { },
+      });
+    } catch (e) {
+      hata3 = e;
+    }
+    kontrol('hiç yedek alınamazsa silme yapılmıyor',
+      !!hata3 && /yedeklenemedi/.test(hata3.message)
+      && istemci3.durum.tasinan.length === 0 && istemci3.durum.silinen.length === 0,
+      hata3 && hata3.message);
+
+    // Tarihten önce posta yoksa hiçbir şeye dokunulmamalı.
+    let istemci4 = null;
+    const sonuc4 = await mail.temizle({
+      ayar,
+      sifre: 'x',
+      klasor: 'INBOX',
+      tarih: '2020-01-01',
+      yedekKok: kok3,
+      uret: () => { istemci4 = sahteIstemci(iletiler); return istemci4; },
+      log: () => { },
+    });
+    kontrol('tarihten önce posta yoksa hiçbir şey silinmiyor',
+      sonuc4.toplam === 0 && sonuc4.silinen === 0
+      && istemci4.durum.tasinan.length === 0 && istemci4.durum.silinen.length === 0,
+      JSON.stringify(sonuc4));
+
+    // Özet ekranı sayıyı ve son postaları veriyor.
+    const ozet = await mail.ozet({
+      ayar, sifre: 'x', klasor: 'INBOX', tarih: '2026-01-01',
+      uret: () => sahteIstemci(iletiler),
+    });
+    kontrol('özet sayıyı ve en yeni postaları veriyor',
+      ozet.toplam === 2 && ozet.ornekler.length === 2
+      && ozet.ornekler[0].uid === 12 && ozet.ornekler[0].gonderen === 'b@x.com'
+      && ozet.sinir === '2026-01-01',
+      JSON.stringify(ozet.ornekler.map((o) => o.uid)));
+
+    const klasorler = await mail.klasorler({ ayar, sifre: 'x', uret: () => sahteIstemci([]) });
+    kontrol('klasör listesi çöp kutusunu özel olarak işaretliyor',
+      klasorler.length === 2 && klasorler[1].ozel === '\\Trash',
+      JSON.stringify(klasorler));
+
+    kontrol('şifresiz bağlanma denenmiyor',
+      await (async () => {
+        try {
+          await mail.ozet({ ayar, sifre: '', klasor: 'INBOX', tarih: '2026-01-01',
+            uret: () => sahteIstemci([]) });
+          return false;
+        } catch (e) { return /şifre/i.test(e.message); }
+      })());
+
+    const sahteDb = (() => {
+      const ortak = new Map();
+      const yerel = new Map();
+      return {
+        ortakAyarOku: (a, v = null) => (ortak.has(a) ? ortak.get(a) : v),
+        ortakAyarYaz: (a, d) => ortak.set(a, d),
+        ayarOku: (a, v = null) => (yerel.has(a) ? yerel.get(a) : v),
+        ayarYaz: (a, d) => yerel.set(a, d),
+        ortak, yerel,
+      };
+    })();
+    const yazilan = mailAyar.yaz(sahteDb, {
+      kullanici: ' ornek@gmail.com ', klasor: 'INBOX', yedekKlasor: '/tmp/yedek',
+    });
+    kontrol('hesap ayarı ortak, yedek klasörü yerel tabloda duruyor',
+      yazilan.kullanici === 'ornek@gmail.com' && yazilan.sunucu === 'imap.gmail.com'
+      && sahteDb.ortak.has('mailKullanici') && !sahteDb.ortak.has(mailAyar.YEREL_ALAN)
+      && sahteDb.yerel.get(mailAyar.YEREL_ALAN) === '/tmp/yedek',
+      JSON.stringify([...sahteDb.ortak.keys()]));
+    kontrol('eksik ayar ve silme öncesi kontrolleri ayrı',
+      mailAyar.dogrula(yazilan, false).join('|') === 'uygulama şifresi'
+      && mailAyar.silmeyeHazir({ ...yazilan, yedekKlasor: '' }, true).join('|') === 'yedek klasörü',
+      mailAyar.dogrula(yazilan, false).join('|'));
+
+    for (const d of [kok, kok2, kok3]) fs.rmSync(d, { recursive: true, force: true });
+  }
+
   console.log('\nTablo kuyruğu');
   {
     const kuyruk = require('../src/main/tablo/kuyruk');

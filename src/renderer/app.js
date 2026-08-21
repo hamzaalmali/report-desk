@@ -25,6 +25,7 @@ const IKON = {
   sag: '<path d="m9 18 6-6-6-6"/>',
   yukari: '<path d="m18 15-6-6-6 6"/>',
   asagi: '<path d="m6 9 6 6 6-6"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m2 7 10 6 10-6"/>',
 };
 
 const svg = (ad, sinif = '') =>
@@ -41,6 +42,7 @@ const SAYFALAR = [
   { id: 'oneri',    ad: 'Öneriler', alt: 'Elle işaretlenecek kayıtlar',    ikon: 'oneri' },
   { id: 'vardiya',  ad: 'Vardiya',  alt: 'Aylık vardiya çizelgesi',        ikon: 'vardiya' },
   { id: 'whatsapp', ad: 'WhatsApp', alt: 'Oturum ve bağlantı durumu',      ikon: 'wa' },
+  { id: 'mail',     ad: 'Ebu İçin Mail', alt: 'Gmail postaları — yedekle ve temizle', ikon: 'mail' },
 ];
 
 const AY_ADI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -280,7 +282,8 @@ async function git(id) {
     await ({
       genel: sayfaGenel, gunluk: sayfaGunluk, ay: sayfaAy, aktar: sayfaAktar,
       gecmis: sayfaGecmis, eslesme: sayfaEslesme, oneri: sayfaOneri,
-      vardiya: sayfaVardiya, whatsapp: sayfaWhatsapp, ayarlar: sayfaAyarlar,
+      vardiya: sayfaVardiya, whatsapp: sayfaWhatsapp, mail: sayfaMail,
+      ayarlar: sayfaAyarlar,
     }[id] || sayfaGenel)();
   } catch (e) {
     el('icerik').innerHTML = `<div class="card p-6 text-danger">${kacar(e.message)}</div>`;
@@ -1878,7 +1881,8 @@ function portalKarti(ayar, hesaplar) {
           <div class="font-medium">Rapor portalı</div>
           <div class="text-[11.5px] text-fg-3">
             Tanımlı numaralardan “rapor gönder” yazılınca portala girilip rapor indirilir;
-            “tablo gönder” ise iki raporu indirip günlük kesinti tablosunu hazırlar</div>
+            “tablo gönder” iki raporla günlük kesinti tablosunu, “bina gönder” üç rapor ve
+            OSOS servisi dosyasıyla BİNA TİPİ OSOS tablosunu hazırlar</div>
         </div>
         <span class="chip border-line-2 text-fg-3" id="portalRozet">
           ${hesaplar.length} numara</span>
@@ -1893,6 +1897,16 @@ function portalKarti(ayar, hesaplar) {
     'listede yazdığı gibi')}
         ${alan('pTabloR2', '“tablo gönder” raporu 2 — kesinti detayı', ayar.tabloRapor2, 'text',
     'listede yazdığı gibi')}
+        ${alan('pBinaR1', '“bina gönder” raporu 1 — AYS İhbar Takip', ayar.binaRapor1, 'text',
+    'listede yazdığı gibi')}
+        ${alan('pBinaR2', '“bina gönder” raporu 2 — AYS Kesintiler Form Detay', ayar.binaRapor2,
+    'text', 'listede yazdığı gibi')}
+        ${alan('pBinaR3', '“bina gönder” raporu 3 — AYS Osos Bağlanma Oran (TSUIS)',
+    ayar.binaRapor3, 'text', 'listede yazdığı gibi')}
+        ${alan('pOsosUrl', 'OSOS servisi adresi (excel üreten sayfa)', ayar.ososUrl, 'text',
+    'http://…/osos')}
+        ${alan('pOsosDugme', 'OSOS servisi indirme düğmesi (boşsa kendi bulur)',
+    ayar.ososDugme, 'text', 'kimlik ya da CSS seçici')}
         ${alan('pGunGeri', 'Başlangıç kaç gün geriden', ayar.gunGeri, 'number', '1')}
         ${alan('pOnaySn', 'Onay kodu bekleme (saniye)', ayar.onaySn, 'number', '180')}
         ${alan('pYenilemeSn', 'Kuyruk yenileme aralığı (saniye)', ayar.yenilemeSn, 'number', '120')}
@@ -1952,6 +1966,7 @@ function portalKarti(ayar, hesaplar) {
           <select id="pKim" class="input" style="min-width:180px"></select>
           <button class="btn btn-brand" id="pCalistir">Şimdi çalıştır</button>
           <button class="btn" id="pTabloCalistir">Tabloyu şimdi hazırla</button>
+          <button class="btn" id="pBinaCalistir">BİNA TİPİ OSOS hazırla</button>
           <button class="btn hidden" id="pDurdur">Durdur</button>
           <span class="text-[11.5px] text-fg-3">
             Tarayıcı açılır, adımlar aşağıda görünür; her adımın HTML'i ve ekran görüntüsü kaydedilir.</span>
@@ -1982,7 +1997,8 @@ function epostaKarti(ayar) {
         <div>
           <div class="font-medium">E-posta</div>
           <div class="text-[11.5px] text-fg-3">
-            Hazırlanan kesinti tablosu, aşağıdaki alıcılara e-postayla da gönderilir</div>
+            Hazırlanan kesinti tablosu ve BİNA TİPİ OSOS dosyası, aşağıdaki alıcılara
+            e-postayla da gönderilir</div>
         </div>
         <span class="chip border-line-2 text-fg-3">
           ${ayar.sunucu ? 'ayarlı' : 'ayarlanmadı'}</span>
@@ -2156,6 +2172,19 @@ function portalIlerlemeCiz() {
     </div>`;
 }
 
+function mailDinleyiciKur() {
+  if (D.mailBagli) return;
+  D.mailBagli = true;
+  api.mailDinle((o) => {
+    const kutu = el('mIlerleme');
+    if (!kutu) return;
+    kutu.classList.remove('hidden');
+    kutu.textContent = o.asama === 'yedek'
+      ? `Yedekleniyor: ${o.biten}/${o.toplam} posta…`
+      : `Gmail'den siliniyor: ${o.biten}/${o.toplam} posta…`;
+  });
+}
+
 function portalDinleyiciKur() {
   if (D.portalBagli) return;
   D.portalBagli = true;
@@ -2200,6 +2229,11 @@ function portalBagla(ayar) {
         raporAdi: el('pRapor').value,
         tabloRapor1: el('pTabloR1').value,
         tabloRapor2: el('pTabloR2').value,
+        binaRapor1: el('pBinaR1').value,
+        binaRapor2: el('pBinaR2').value,
+        binaRapor3: el('pBinaR3').value,
+        ososUrl: el('pOsosUrl').value,
+        ososDugme: el('pOsosDugme').value,
         saat: el('pSaat').value,
         gunGeri: el('pGunGeri').value,
         onaySn: el('pOnaySn').value,
@@ -2283,6 +2317,317 @@ function portalBagla(ayar) {
         + `1000+ abone: ${o.binAbone ?? '-'} · 2+ ilçe: ${o.ikiIlce ?? '-'} · `
         + `Rekortman: ${o.rekortman ?? '-'}${postaNotu}`, p && !p.ok ? 'uyari' : 'basari');
     });
+
+  el('pBinaCalistir').onclick = () => portalKostur('pBinaCalistir',
+    () => (!ayar.girisUrl || !el('pBinaR1').value.trim() || !el('pBinaR2').value.trim()
+      || !el('pBinaR3').value.trim() || !el('pOsosUrl').value.trim()
+      ? 'Önce giriş adresini, üç rapor adını ve OSOS servisi adresini kaydedin.' : null),
+    async (numara) => {
+      const r = await cagir(api.binaCalistir(numara));
+      const o = r.ozet || {};
+      const p = r.posta;
+      const postaNotu = !p ? ''
+        : (p.ok ? `<br>E-postayla da gönderildi (${p.alici} alıcı).`
+          : `<br>E-posta gönderilemedi: ${kacar(p.hata || '')}`);
+      bildir(`<b>BİNA TİPİ OSOS hazırlandı.</b><br>${kacar(r.dosyaAdi || '')}<br>`
+        + `OSOS ihbarı: ${o.ihbar ?? '-'} · osos_rapor'da yok: ${o.ososYok ?? '-'} · `
+        + `kesinti kaydı yok: ${o.kesintiYok ?? '-'} · `
+        + `Bağlantı satırı: ${o.baglanti ?? '-'}${postaNotu}`, p && !p.ok ? 'uyari' : 'basari');
+    });
+}
+
+function mailBoyut(b) {
+  const n = Number(b) || 0;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+function mailTarihMetni(v) {
+  if (!v) return '-';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '-';
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.`
+    + `${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:`
+    + `${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function mailListeCiz() {
+  const o = D.mailOzet;
+  const kutu = el('mListe');
+  if (!kutu) return;
+  if (!o) {
+    kutu.innerHTML = '<div class="p-5 text-[12.5px] text-fg-3">'
+      + 'Klasör ve tarih seçip “Postaları listele” deyin.</div>';
+    el('mSilKutu').classList.add('hidden');
+    return;
+  }
+  if (!o.toplam) {
+    kutu.innerHTML = `<div class="p-5 text-[12.5px] text-fg-3">
+      <b>${kacar(o.klasor)}</b> klasöründe ${kacar(o.sinir)} tarihinden önce posta yok
+      (klasörde toplam ${o.klasorToplam} posta var).</div>`;
+    el('mSilKutu').classList.add('hidden');
+    return;
+  }
+  const satirlar = o.ornekler.map((m) => `
+    <tr>
+      <td class="whitespace-nowrap">${kacar(mailTarihMetni(m.tarih))}</td>
+      <td>${kacar(m.gonderen)}</td>
+      <td>${kacar(m.konu)}</td>
+      <td class="whitespace-nowrap text-right">${mailBoyut(m.boyut)}</td>
+    </tr>`).join('');
+  kutu.innerHTML = `
+    <div class="border-b border-line px-5 py-3 text-[12.5px]">
+      <b>${kacar(o.klasor)}</b> klasöründe <b>${kacar(o.sinir)}</b> tarihinden önce
+      <b class="text-warn">${o.toplam}</b> posta var
+      (klasörde toplam ${o.klasorToplam}).
+      ${o.ornekler.length < o.toplam
+        ? `Aşağıda en yeni ${o.ornekler.length} tanesi listelendi.` : ''}
+    </div>
+    <div class="max-h-80 overflow-auto">
+      <table class="tbl">
+        <thead><tr>
+          <th class="w-36">Tarih</th><th class="w-64">Gönderen</th><th>Konu</th>
+          <th class="w-20 text-right">Boyut</th>
+        </tr></thead>
+        <tbody>${satirlar}</tbody>
+      </table>
+    </div>`;
+  el('mSilKutu').classList.remove('hidden');
+  el('mSilOzet').innerHTML = `<b>${o.toplam}</b> posta önce
+    <b>${kacar(D.mailAyar.yedekKlasor || '')}</b> klasörüne <code>.eml</code> olarak yazılacak,
+    yedeği doğrulananlar Gmail'den <b class="text-danger">kalıcı olarak</b> silinecek.`;
+  el('mOnayKutu').classList.add('hidden');
+}
+
+async function sayfaMail() {
+  mailDinleyiciKur();
+  const ayar = await cagir(api.mailAyar());
+  D.mailAyar = ayar;
+  D.mailOzet = null;
+
+  const alan = (id, etiket, deger, tur = 'text', ipucu = '') => `
+    <label class="flex flex-col gap-1">
+      <span class="text-[11px] text-fg-3">${etiket}</span>
+      <input type="${tur}" id="${id}" class="input" value="${kacar(deger == null ? '' : deger)}"
+             placeholder="${kacar(ipucu)}" />
+    </label>`;
+
+  const bugun = new Date();
+  const varsayilanTarih = `${bugun.getFullYear() - 1}-`
+    + `${String(bugun.getMonth() + 1).padStart(2, '0')}-`
+    + `${String(bugun.getDate()).padStart(2, '0')}`;
+
+  el('icerik').innerHTML = `
+    <div class="min-h-0 flex-1 space-y-4 overflow-auto">
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="font-medium">Gmail hesabı</div>
+            <div class="text-[11.5px] text-fg-3">
+              IMAP ile bağlanılır — Gmail’de 2 adımlı doğrulama açıkken üretilen
+              <b>uygulama şifresi</b> gerekir, normal hesap şifresi çalışmaz</div>
+          </div>
+          <span class="chip ${ayar.eksik.length ? 'border-warn/50 text-warn' : 'border-brand-2/50 text-brand'}">
+            ${ayar.eksik.length ? 'eksik ayar' : 'hazır'}</span>
+        </div>
+        <div class="grid gap-3 p-5 md:grid-cols-2">
+          ${alan('mKullanici', 'E-posta adresi', ayar.kullanici, 'text', 'ornek@gmail.com')}
+          ${alan('mSifre', 'Uygulama şifresi (16 hane)', '', 'password',
+    ayar.sifreVar ? 'kayıtlı — değiştirmek için yazın' : 'xxxx xxxx xxxx xxxx')}
+          <label class="flex flex-col gap-1 md:col-span-2">
+            <span class="text-[11px] text-fg-3">Yedek klasörü (silinen postalar buraya yazılır)</span>
+            <div class="flex gap-2">
+              <input type="text" id="mYedek" class="input flex-1"
+                     value="${kacar(ayar.yedekKlasor || '')}" readonly />
+              <button class="btn" id="mYedekSec">Klasör seç</button>
+              <button class="btn" id="mYedekAc">Aç</button>
+            </div>
+          </label>
+          <details class="md:col-span-2">
+            <summary class="cursor-pointer text-[11.5px] text-fg-3">Sunucu (gelişmiş)</summary>
+            <div class="mt-2 grid gap-3 md:grid-cols-2">
+              ${alan('mSunucu', 'IMAP sunucusu', ayar.sunucu, 'text', 'imap.gmail.com')}
+              ${alan('mPort', 'Port', ayar.port, 'number', '993')}
+            </div>
+          </details>
+          <div class="flex flex-wrap items-center gap-2 md:col-span-2">
+            <button class="btn btn-brand" id="mKaydet">Ayarları kaydet</button>
+            <button class="btn" id="mSina">Bağlantıyı sına</button>
+            <span class="text-[11.5px] ${ayar.kasaVar ? 'text-fg-3' : 'text-warn'}">
+              ${ayar.kasaVar
+                ? 'Şifre bu bilgisayarın kasasında şifrelenir; arayüze geri dönmez.'
+                : 'Bu bilgisayarda işletim sistemi kasası yok — şifre düz metin saklanır.'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <div class="font-medium">Postaları yedekle ve temizle</div>
+            <div class="text-[11.5px] text-fg-3">
+              Seçilen tarihten <b>önceki</b> postalar bilgisayara <code>.eml</code> olarak
+              yedeklenir, yedeği doğrulananlar Gmail’den kalıcı silinir</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-end gap-3 border-b border-line p-5">
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-fg-3">Klasör</span>
+            <select id="mKlasor" class="input" style="min-width:220px">
+              <option value="${kacar(ayar.klasor || 'INBOX')}">${kacar(ayar.klasor || 'INBOX')}</option>
+            </select>
+          </label>
+          <button class="btn" id="mKlasorYenile">Klasörleri getir</button>
+          <label class="flex flex-col gap-1">
+            <span class="text-[11px] text-fg-3">Bu tarihten öncekiler</span>
+            <input type="date" id="mTarih" class="input" value="${varsayilanTarih}" />
+          </label>
+          <button class="btn btn-brand" id="mListele">Postaları listele</button>
+        </div>
+        <div id="mListe"></div>
+        <div id="mSilKutu" class="hidden space-y-3 border-t border-line p-5">
+          <div class="text-[12.5px]" id="mSilOzet"></div>
+          <button class="btn border-danger/60 text-danger" id="mSil">
+            Yedekle ve kalıcı sil</button>
+          <div id="mOnayKutu" class="hidden rounded-md border border-danger/60 bg-danger/10 p-3">
+            <div class="mb-2 text-[12.5px]">
+              Bu işlem geri alınamaz. Onaylamak için kutuya <b>SİL</b> yazın.</div>
+            <div class="flex gap-2">
+              <input type="text" id="mOnayMetin" class="input w-32" placeholder="SİL" />
+              <button class="btn border-danger/60 text-danger" id="mOnayla">
+                Evet, kalıcı sil</button>
+              <button class="btn" id="mVazgec">Vazgeç</button>
+            </div>
+          </div>
+          <div id="mIlerleme" class="hidden text-[12.5px] text-fg-2"></div>
+        </div>
+      </div>
+    </div>`;
+
+  mailListeCiz();
+
+  const ayarlariTopla = () => ({
+    kullanici: el('mKullanici').value.trim(),
+    sunucu: el('mSunucu').value.trim(),
+    port: el('mPort').value,
+    klasor: el('mKlasor').value,
+    sifre: el('mSifre').value,
+  });
+
+  const kaydet = async () => {
+    D.mailAyar = await cagir(api.mailAyarYaz(ayarlariTopla()));
+    el('mSifre').value = '';
+    if (D.mailAyar.sifreVar) el('mSifre').placeholder = 'kayıtlı — değiştirmek için yazın';
+    return D.mailAyar;
+  };
+
+  el('mKaydet').onclick = async () => {
+    try {
+      await kaydet();
+      bildir('Mail ayarları kaydedildi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('mYedekSec').onclick = async () => {
+    try {
+      const y = await cagir(api.mailYedekSec());
+      if (!y) return;
+      D.mailAyar = y;
+      el('mYedek').value = y.yedekKlasor || '';
+      bildir('Yedek klasörü seçildi.', 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('mYedekAc').onclick = async () => {
+    try { await cagir(api.mailYedekAc()); }
+    catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  const klasorleriGetir = async (dugme) => {
+    const b = el(dugme);
+    const eski = b.innerHTML;
+    b.disabled = true;
+    b.textContent = 'Bağlanılıyor…';
+    try {
+      await kaydet();
+      const liste = await cagir(api.mailKlasorler());
+      const secili = el('mKlasor').value;
+      el('mKlasor').innerHTML = liste.map((k) =>
+        `<option value="${kacar(k.yol)}" ${k.yol === secili ? 'selected' : ''}>
+          ${kacar(k.yol)}${k.ozel ? ` (${kacar(k.ozel.replace(/\\\\/g, ''))})` : ''}</option>`).join('');
+      return liste.length;
+    } finally {
+      b.disabled = false;
+      b.innerHTML = eski;
+    }
+  };
+
+  el('mKlasorYenile').onclick = async () => {
+    try {
+      const n = await klasorleriGetir('mKlasorYenile');
+      bildir(`${n} klasör bulundu.`, 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('mSina').onclick = async () => {
+    try {
+      const n = await klasorleriGetir('mSina');
+      bildir(`<b>Bağlantı çalışıyor.</b><br>${n} klasör görüldü.`, 'basari');
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+  };
+
+  el('mListele').onclick = async () => {
+    const b = el('mListele');
+    b.disabled = true;
+    try {
+      await kaydet();
+      D.mailOzet = await cagir(api.mailOzet({
+        klasor: el('mKlasor').value, tarih: el('mTarih').value,
+      }));
+      mailListeCiz();
+    } catch (e) { bildir(kacar(e.message), 'hata'); }
+    finally { b.disabled = false; }
+  };
+
+  el('mSil').onclick = () => {
+    if (!D.mailAyar.yedekKlasor) return bildir('Önce yedek klasörünü seçin.', 'hata');
+    el('mOnayKutu').classList.remove('hidden');
+    el('mOnayMetin').value = '';
+    el('mOnayMetin').focus();
+  };
+  el('mVazgec').onclick = () => el('mOnayKutu').classList.add('hidden');
+
+  el('mOnayla').onclick = async () => {
+    if (el('mOnayMetin').value.trim().toUpperCase().replace('I', 'İ') !== 'SİL') {
+      return bildir('Onaylamak için kutuya SİL yazın.', 'uyari');
+    }
+    const b = el('mOnayla');
+    b.disabled = true;
+    el('mIlerleme').classList.remove('hidden');
+    el('mIlerleme').textContent = 'Gmail’e bağlanılıyor…';
+    try {
+      const r = await cagir(api.mailSil({
+        klasor: el('mKlasor').value, tarih: el('mTarih').value,
+      }));
+      const atlanan = r.atlanan && r.atlanan.length
+        ? `<br>${r.atlanan.length} posta yedeklenemediği için <b>silinmedi</b>.` : '';
+      bildir(`<b>${r.silinen} posta kalıcı silindi.</b><br>`
+        + `${r.yedeklenen} posta yedeklendi (${mailBoyut(r.bayt)}).${atlanan}`,
+        atlanan ? 'uyari' : 'basari');
+      el('mOnayKutu').classList.add('hidden');
+      D.mailOzet = await cagir(api.mailOzet({
+        klasor: el('mKlasor').value, tarih: el('mTarih').value,
+      }));
+      mailListeCiz();
+    } catch (e) {
+      bildir(kacar(e.message), 'hata');
+    } finally {
+      b.disabled = false;
+      el('mIlerleme').classList.add('hidden');
+    }
+  };
 }
 
 async function sayfaAyarlar() {

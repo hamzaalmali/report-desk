@@ -42,6 +42,14 @@ const KOMUTLAR = [
     calistir: (b) => b.servisler.rapor(b),
   },
   {
+    kod: 'bina',
+    tam: ['BİNA', 'BİNAGÖNDER', 'BİNATİPİ', 'BİNATİPİOSOS', 'OSOSGÖNDER', 'BİNATİPİOSOSGÖNDER'],
+    onEk: ['BİNAGÖNDER', 'BİNATİPİOSOS', 'BİNATİPİ', 'OSOSGÖNDER'],
+    ozelSohbet: true,
+    servis: 'bina',
+    calistir: (b) => b.servisler.bina(b),
+  },
+  {
     kod: 'tablo',
     tam: ['TABLO', 'TABLOGÖNDER', 'TABLOAL', 'TABLOHAZIRLA', 'KESİNTİTABLOSU'],
     onEk: ['TABLOGÖNDER', 'TABLOHAZIRLA', 'KESİNTİTABLOSU'],

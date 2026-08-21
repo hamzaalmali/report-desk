@@ -46,7 +46,7 @@
   sonuc.sidebarAcik = q('#sidebar').getBoundingClientRect().width;
 
   for (const s of ['gunluk', 'ay', 'aktar', 'gecmis', 'eslesme', 'oneri',
-    'vardiya', 'whatsapp', 'ayarlar']) {
+    'vardiya', 'whatsapp', 'mail', 'ayarlar']) {
     document.querySelector(`[data-sayfa="${s}"]`).click();
     await bekle(s === 'ay' ? 1600 : 900);
     sonuc.adimlar.push(olc(s));

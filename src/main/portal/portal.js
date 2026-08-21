@@ -14,8 +14,11 @@ const ALAN = {
   onay: 'btnOnay',
   rapor: 'ctl00_ContentPlaceHolder1_cmbRaporlar',
   ilKodu: 'ctl00_ContentPlaceHolder1_cmbILKODU',
+  mudurlukKodu: 'ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU',
   basTarih: 'ctl00_ContentPlaceHolder1_dateTimeBASTARIH',
   sonTarih: 'ctl00_ContentPlaceHolder1_dateTimeSONTARIH',
+  basTarihAlt: 'ctl00_ContentPlaceHolder1_dateTimeBASLANGICTARIHI',
+  sonTarihAlt: 'ctl00_ContentPlaceHolder1_dateTimeBITISTARIHI',
   saat: 'ctl00_ContentPlaceHolder1_cmbSAAT',
   kaydet: 'ctl00_ContentPlaceHolder1_btnRaporKaydet_input',
   yenile: 'ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input',
@@ -27,6 +30,11 @@ const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 
 const BOLME = 'persist:portal';
 const IL_KODU_DEGERI = 'Tümü';
+
+const TUMU_KUTULARI = [ALAN.ilKodu, ALAN.mudurlukKodu];
+const TUMU_DEGERLERI = [IL_KODU_DEGERI, 'TÜMÜ', 'Tumu', 'TUMU'];
+const BAS_TARIH_KUTULARI = [ALAN.basTarih, ALAN.basTarihAlt];
+const SON_TARIH_KUTULARI = [ALAN.sonTarih, ALAN.sonTarihAlt];
 const VARSAYILAN_SAYFA_SN = 180;
 const OGE_SURESI = 30000;
 const INDIRME_SURESI = 180000;
@@ -758,53 +766,67 @@ async function calistir(istek) {
       return { yontem, deger };
     });
 
-    await adim('tarihler' + ek, 'Form dolduruluyor' + etiket, async () => {
-      let ilKodu = null;
-      if (await dene(`!!window.__rd.bul(${JSON.stringify(ALAN.ilKodu + '_Input')})`)) {
-        await js(`window.__rd.comboAc(${JSON.stringify(ALAN.ilKodu)})`);
-        await uyu(700);
-        let ilYontem = await dene(
-          `window.__rd.comboSec(${JSON.stringify(ALAN.ilKodu)}, ${JSON.stringify(IL_KODU_DEGERI)})`
-        ) ? 'liste' : null;
-        if (!ilYontem) {
-          ilYontem = await dene(
-            `window.__rd.comboApi(${JSON.stringify(ALAN.ilKodu)}, ${JSON.stringify(IL_KODU_DEGERI)})`
-          );
-        }
-        await uyu(800);
-        await sakinlesme();
-        const ilDeger = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.ilKodu)})`);
-        ilKodu = { yontem: ilYontem, deger: ilDeger };
-        if (!ilYontem) log(`Portal: il kodu "${IL_KODU_DEGERI}" seçilemedi, kutuda "${ilDeger || ''}" var.`);
-      }
-
-      const bas = await js(
-        `window.__rd.tarih(${JSON.stringify(ALAN.basTarih)}, ${JSON.stringify(aralik.bas.metin)},`
-        + ` ${aralik.bas.gun}, ${aralik.bas.ay}, ${aralik.bas.yil})`
-      );
-      const son = await js(
-        `window.__rd.tarih(${JSON.stringify(ALAN.sonTarih)}, ${JSON.stringify(aralik.son.metin)},`
-        + ` ${aralik.son.gun}, ${aralik.son.ay}, ${aralik.son.yil})`
-      );
-      await uyu(400);
-
-      await js(`window.__rd.comboAc(${JSON.stringify(ALAN.saat)})`);
+    const comboDoldur = async (id, degerler) => {
+      if (!await dene(`!!window.__rd.bul(${JSON.stringify(id + '_Input')})`)) return null;
+      await js(`window.__rd.comboAc(${JSON.stringify(id)})`);
       await uyu(700);
-      let saatYontem = await dene(
-        `window.__rd.comboSec(${JSON.stringify(ALAN.saat)}, ${JSON.stringify(ayarlar.saat)})`
-      ) ? 'liste' : null;
-      if (!saatYontem) {
-        saatYontem = await dene(
-          `window.__rd.comboApi(${JSON.stringify(ALAN.saat)}, ${JSON.stringify(ayarlar.saat)})`
-        );
+      let yontem = null;
+      for (const d of degerler) {
+        if (await dene(`window.__rd.comboSec(${JSON.stringify(id)}, ${JSON.stringify(d)})`)) {
+          yontem = 'liste';
+          break;
+        }
+      }
+      if (!yontem) {
+        for (const d of degerler) {
+          yontem = await dene(`window.__rd.comboApi(${JSON.stringify(id)}, ${JSON.stringify(d)})`);
+          if (yontem) break;
+        }
       }
       await uyu(800);
       await sakinlesme();
-      const saat = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.saat)})`);
+      const deger = await dene(`window.__rd.comboDeger(${JSON.stringify(id)})`);
+      return { id, yontem, deger };
+    };
 
-      if (!bas || !son) throw new Error('Tarih kutuları bulunamadı.');
+    const tarihDoldur = async (kutular, parca) => {
+      for (const id of kutular) {
+        if (!await dene(`!!window.__rd.bul(${JSON.stringify(id + '_dateInput')})`)) continue;
+        const deger = await js(
+          `window.__rd.tarih(${JSON.stringify(id)}, ${JSON.stringify(parca.metin)},`
+          + ` ${parca.gun}, ${parca.ay}, ${parca.yil})`
+        );
+        if (deger) return { id, deger };
+      }
+      return null;
+    };
+
+    await adim('tarihler' + ek, 'Form dolduruluyor' + etiket, async () => {
+      const kapsam = [];
+      for (const id of TUMU_KUTULARI) {
+        const sonuc = await comboDoldur(id, TUMU_DEGERLERI);
+        if (!sonuc) continue;
+        kapsam.push(sonuc);
+        if (!sonuc.yontem) {
+          log(`Portal: "${IL_KODU_DEGERI}" seçilemedi (${id}), kutuda "${sonuc.deger || ''}" var.`);
+        }
+      }
+
+      const bas = await tarihDoldur(BAS_TARIH_KUTULARI, aralik.bas);
+      const son = await tarihDoldur(SON_TARIH_KUTULARI, aralik.son);
+      await uyu(400);
+
+      const saatKutusu = await comboDoldur(ALAN.saat, [ayarlar.saat]);
+
+      if (!bas || !son) {
+        throw new Error('Tarih kutuları bulunamadı — bu raporun tarih alanları '
+          + `beklenenden farklı olabilir (${BAS_TARIH_KUTULARI.join(', ')}).`);
+      }
       return {
-        bas, son, saat, saatYontem, ilKodu,
+        bas: bas.deger, son: son.deger, basKutusu: bas.id, sonKutusu: son.id,
+        saat: saatKutusu ? saatKutusu.deger : null,
+        saatYontem: saatKutusu ? saatKutusu.yontem : null,
+        kapsam,
         istenenBas: aralik.bas.metin, istenenSon: aralik.son.metin,
       };
     });
@@ -966,6 +988,6 @@ async function calistir(istek) {
 }
 
 module.exports = {
-  calistir, durumAl, iptal, tarihAraligi, dosyaAdiTemiz, gizle,
+  calistir, durumAl, iptal, tarihAraligi, dosyaAdiTemiz, gizle, indirmeyiIzle,
   ALAN, KUYRUK_SECICI, YARDIM,
 };

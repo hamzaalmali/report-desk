@@ -9,11 +9,13 @@ const http = require('node:http');
 const { app } = require('electron');
 
 const portal = require('../src/main/portal/portal');
+const servisIndir = require('../src/main/portal/servisIndir');
 
 const KULLANICI = 'deneme-kullanici';
 const SIFRE = 'deneme-sifre-123';
 const KOD = '654321';
 const RAPOR = 'AYS Kesintiler Form Detay';
+const RAPOR_TSUIS = 'AYS Osos Bağlanma Oran Raporu TSUIS';
 
 let gecti = 0;
 let kaldi = 0;
@@ -64,14 +66,42 @@ const ANA = SAYFA('Ana Sayfa', `
 
 const BOS = SAYFA('Bos', '<div>hoş geldiniz</div>');
 
+const OSOS_SERVISI = (tarih) => SAYFA('OSOS Servisi', `
+  <h1>OSOS bina tipi listesi</h1>
+  <div>İstenen gün: <span id="gun">${tarih || '-'}</span></div>
+  <button id="btnYenile">Listeyi Yenile</button>
+  <button id="btnExcel">Excel Oluştur</button>
+  <script>
+    document.getElementById('btnExcel').addEventListener('click', function () {
+      window.location = '/osos-indir';
+    });
+  </script>`);
+
+const OSOS_DUGMESIZ = SAYFA('OSOS Servisi', '<h1>OSOS</h1><div>burada düğme yok</div>');
+
 const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
   <h1>Rapor</h1>
-  <div id="ctl00_ContentPlaceHolder1_cmbILKODU">
-    <input id="ctl00_ContentPlaceHolder1_cmbILKODU_Input" readonly value="Seçiniz" />
-    <span id="ctl00_ContentPlaceHolder1_cmbILKODU_Arrow">▾</span>
-    <div id="ctl00_ContentPlaceHolder1_cmbILKODU_DropDown" style="display:none">
-      <ul><li>Seçiniz</li><li>Tümü</li><li>Bursa</li></ul>
+  <div id="klasikForm">
+    <div id="ctl00_ContentPlaceHolder1_cmbILKODU">
+      <input id="ctl00_ContentPlaceHolder1_cmbILKODU_Input" readonly value="Seçiniz" />
+      <span id="ctl00_ContentPlaceHolder1_cmbILKODU_Arrow">▾</span>
+      <div id="ctl00_ContentPlaceHolder1_cmbILKODU_DropDown" style="display:none">
+        <ul><li>Seçiniz</li><li>Tümü</li><li>Bursa</li></ul>
+      </div>
     </div>
+    <input id="ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput" />
+    <input id="ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput" />
+  </div>
+  <div id="tsuisForm">
+    <div id="ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU">
+      <input id="ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU_Input" readonly value="Seçiniz" />
+      <span id="ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU_Arrow">▾</span>
+      <div id="ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU_DropDown" style="display:none">
+        <ul><li>Seçiniz</li><li>TÜMÜ</li><li>BİGA</li></ul>
+      </div>
+    </div>
+    <input id="ctl00_ContentPlaceHolder1_dateTimeBASLANGICTARIHI_dateInput" />
+    <input id="ctl00_ContentPlaceHolder1_dateTimeBITISTARIHI_dateInput" />
   </div>
   <div id="ctl00_ContentPlaceHolder1_cmbRaporlar">
     <input id="ctl00_ContentPlaceHolder1_cmbRaporlar_Input" readonly />
@@ -80,12 +110,11 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
       <ul>
         <li>Başka Bir Rapor</li>
         <li>${RAPOR}</li>
+        <li>${RAPOR_TSUIS}</li>
         <li>Üçüncü Rapor</li>
       </ul>
     </div>
   </div>
-  <input id="ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput" />
-  <input id="ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput" />
   <div id="ctl00_ContentPlaceHolder1_cmbSAAT">
     <input id="ctl00_ContentPlaceHolder1_cmbSAAT_Input" readonly />
     <span id="ctl00_ContentPlaceHolder1_cmbSAAT_Arrow">▾</span>
@@ -97,6 +126,7 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
          type="button" value="Raporu Kaydet" />
   <script>
     function kur(id) {
+      if (!document.getElementById(id)) return;
       var acici = function () {
         document.getElementById(id + '_DropDown').style.display = 'block';
       };
@@ -111,19 +141,37 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
         });
       });
     }
+    var formSec = function (deger) {
+      var atilacak = deger === ${JSON.stringify(RAPOR_TSUIS)} ? 'klasikForm' : 'tsuisForm';
+      var e = document.getElementById(atilacak);
+      if (e) e.parentNode.removeChild(e);
+    };
+    document.getElementById('ctl00_ContentPlaceHolder1_cmbRaporlar_DropDown')
+      .addEventListener('click', function (o) {
+        if (o.target && o.target.tagName === 'LI') formSec(o.target.textContent.trim());
+      }, true);
     kur('ctl00_ContentPlaceHolder1_cmbRaporlar');
     kur('ctl00_ContentPlaceHolder1_cmbSAAT');
     kur('ctl00_ContentPlaceHolder1_cmbILKODU');
+    kur('ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU');
     document.getElementById('ctl00_ContentPlaceHolder1_btnRaporKaydet_input')
       .addEventListener('click', function () {
-        var b = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput').value;
-        var s = document.getElementById('ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput').value;
-        var r = document.getElementById('ctl00_ContentPlaceHolder1_cmbRaporlar_Input').value;
-        var t = document.getElementById('ctl00_ContentPlaceHolder1_cmbSAAT_Input').value;
-        var i = document.getElementById('ctl00_ContentPlaceHolder1_cmbILKODU_Input').value;
+        var deger = function (id) {
+          var e = document.getElementById(id);
+          return e ? e.value : '';
+        };
+        var tsuis = !!document.getElementById('tsuisForm');
+        var b = deger(tsuis ? 'ctl00_ContentPlaceHolder1_dateTimeBASLANGICTARIHI_dateInput'
+          : 'ctl00_ContentPlaceHolder1_dateTimeBASTARIH_dateInput');
+        var s = deger(tsuis ? 'ctl00_ContentPlaceHolder1_dateTimeBITISTARIHI_dateInput'
+          : 'ctl00_ContentPlaceHolder1_dateTimeSONTARIH_dateInput');
+        var r = deger('ctl00_ContentPlaceHolder1_cmbRaporlar_Input');
+        var t = deger('ctl00_ContentPlaceHolder1_cmbSAAT_Input');
+        var i = deger('ctl00_ContentPlaceHolder1_cmbILKODU_Input')
+          || deger('ctl00_ContentPlaceHolder1_cmbMUDURLUKKODU_Input');
         window.location = '/kaydet?bas=' + encodeURIComponent(b) + '&son=' + encodeURIComponent(s)
           + '&rapor=' + encodeURIComponent(r) + '&saat=' + encodeURIComponent(t)
-          + '&il=' + encodeURIComponent(i);
+          + '&il=' + encodeURIComponent(i) + '&duzen=' + (tsuis ? 'tsuis' : 'klasik');
       });
   </script>`);
 
@@ -212,6 +260,17 @@ function sunucuKur(kayit) {
       kayit.silindi = true;
       kayit.olaylar.push('silme');
       return yolla(KUYRUK(kayit.yenileme, true, kayit.kaydet && kayit.kaydet.rapor));
+    }
+    if (url.pathname === '/osos') {
+      kayit.ososGun = url.searchParams.get('g');
+      return yolla(OSOS_SERVISI(kayit.ososGun));
+    }
+    if (url.pathname === '/osos-bos') return yolla(OSOS_DUGMESIZ);
+    if (url.pathname === '/osos-indir') {
+      kayit.ososIndirme = (kayit.ososIndirme || 0) + 1;
+      return yolla('sahte-osos-icerigi', 'application/octet-stream', {
+        'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
+      });
     }
     if (url.pathname === '/Onay.aspx') return yolla(ONAY);
     if (url.pathname === '/default.aspx') return yolla(ANA);
@@ -355,7 +414,7 @@ app.whenReady().then(async () => {
 
   console.log('\nİki raporlu akış (tablo için)');
   {
-    const IKINCI = 'Üçüncü Rapor';
+    const IKINCI = RAPOR_TSUIS;
     kayit.olaylar = [];
     kayit.kaydetler = [];
     kayit.silindi = false;
@@ -403,9 +462,20 @@ app.whenReady().then(async () => {
         kayit.kaydetler.length === 2 && kayit.kaydetler[0].rapor === RAPOR
         && kayit.kaydetler[1].rapor === IKINCI,
         kayit.kaydetler.map((k) => k.rapor).join(' | '));
-      kontrol('il kodu her iki raporda da Tümü seçildi',
-        kayit.kaydetler.every((k) => k.il === 'Tümü'),
+      kontrol('kapsam kutusu her iki raporda da "Tümü" seçildi',
+        kayit.kaydetler.length === 2 && kayit.kaydetler[0].il === 'Tümü'
+        && kayit.kaydetler[1].il === 'TÜMÜ',
         kayit.kaydetler.map((k) => k.il).join(' | '));
+      kontrol('ikinci rapor müdürlük kodlu/farklı tarih alanlı düzeni doldurdu',
+        kayit.kaydetler[0].duzen === 'klasik' && kayit.kaydetler[1].duzen === 'tsuis'
+        && !!kayit.kaydetler[1].bas && !!kayit.kaydetler[1].son
+        && kayit.kaydetler[0].bas === kayit.kaydetler[1].bas,
+        kayit.kaydetler.map((k) => `${k.duzen}:${k.bas}→${k.son}`).join(' | '));
+      const tarihAdimi = adimlar2.find((a) => a.kod === 'tarihler-r2');
+      kontrol('ikinci raporda kullanılan tarih kutuları kayda geçti',
+        !!tarihAdimi && /BASLANGICTARIHI$/.test(tarihAdimi.sonuc.basKutusu || '')
+        && /BITISTARIHI$/.test(tarihAdimi.sonuc.sonKutusu || ''),
+        tarihAdimi && `${tarihAdimi.sonuc.basKutusu} / ${tarihAdimi.sonuc.sonKutusu}`);
       kontrol('iki dosya da indirildi ve ayrı adla saklandı',
         !!sonuc2.dosyalar && sonuc2.dosyalar.length === 2
         && sonuc2.dosyalar.every((d) => d.dosya && fs.existsSync(d.dosya))
@@ -431,6 +501,65 @@ app.whenReady().then(async () => {
         sonuc2.dosya === sonuc2.dosyalar[0].dosya && sonuc2.dosyaAdi === sonuc2.dosyalar[0].ad,
         sonuc2.dosyaAdi);
     }
+  }
+
+  console.log('\nOSOS servisinden indirme');
+  {
+    const servisKlasor = path.join(klasor, 'osos');
+    let ososHata = null;
+    let dosya = null;
+    try {
+      dosya = await servisIndir.indir({
+        url: `${kok}/osos?g={tarih}`,
+        klasor: servisKlasor,
+        aralik: { bas: '11.08.2026', son: '12.08.2026' },
+        gorunur,
+        kapat: true,
+        log: (m) => console.log('    · ' + m),
+      });
+    } catch (e) {
+      ososHata = e;
+    }
+    kontrol('düğme adı aranarak dosya indirildi',
+      !ososHata && !!dosya && fs.existsSync(dosya.dosya)
+      && fs.readFileSync(dosya.dosya, 'utf8') === 'sahte-osos-icerigi'
+      && dosya.ad === 'osos_rapor.xlsx',
+      ososHata ? ososHata.message : (dosya && dosya.ad));
+    kontrol('adresteki tarih yer tutucusu servise gitti',
+      kayit.ososGun === '11.08.2026', String(kayit.ososGun));
+
+    let secicili = null;
+    try {
+      secicili = await servisIndir.indir({
+        url: `${kok}/osos`,
+        klasor: servisKlasor,
+        dugme: 'btnExcel',
+        gorunur,
+        kapat: true,
+        log: () => { },
+      });
+    } catch (e) {
+      secicili = e;
+    }
+    kontrol('ayarlardaki düğme kimliği kullanılabiliyor',
+      secicili && secicili.dosya && fs.existsSync(secicili.dosya)
+      && secicili.ad !== 'osos_rapor.xlsx',
+      secicili && (secicili.ad || secicili.message));
+
+    let dugmesizHata = null;
+    try {
+      await servisIndir.indir({
+        url: `${kok}/osos-bos`, klasor: servisKlasor, gorunur, kapat: false, log: () => { },
+      });
+    } catch (e) {
+      dugmesizHata = e;
+    }
+    kontrol('düğme yoksa anlaşılır hata veriyor',
+      !!dugmesizHata && /indirme düğmesi bulunamadı/.test(dugmesizHata.message),
+      dugmesizHata && dugmesizHata.message);
+    kontrol('hata olunca servis penceresi de kapandı',
+      require('electron').BrowserWindow.getAllWindows().length === 0,
+      `${require('electron').BrowserWindow.getAllWindows().length} pencere açık`);
   }
 
   console.log('\nHatada tarayıcı kapanıyor');
