@@ -266,6 +266,16 @@ function sunucuKur(kayit) {
       return yolla(OSOS_SERVISI(kayit.ososGun));
     }
     if (url.pathname === '/osos-bos') return yolla(OSOS_DUGMESIZ);
+    if (url.pathname === '/osos-dogrudan') {
+      kayit.ososDogrudan = (kayit.ososDogrudan || 0) + 1;
+      return yolla('dogrudan-inen-icerik', 'application/octet-stream', {
+        'Content-Disposition': 'attachment; filename="bina_tipi.xlsx"',
+      });
+    }
+    if (url.pathname === '/osos-adsiz') {
+      return yolla('adsiz-inen-icerik',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }
     if (url.pathname === '/osos-indir') {
       kayit.ososIndirme = (kayit.ososIndirme || 0) + 1;
       return yolla('sahte-osos-icerigi', 'application/octet-stream', {
@@ -527,6 +537,56 @@ app.whenReady().then(async () => {
       ososHata ? ososHata.message : (dosya && dosya.ad));
     kontrol('adresteki tarih yer tutucusu servise gitti',
       kayit.ososGun === '11.08.2026', String(kayit.ososGun));
+
+    const { BrowserWindow: BW } = require('electron');
+    let dogrudan = null;
+    try {
+      dogrudan = await servisIndir.indir({
+        url: `${kok}/osos-dogrudan`,
+        klasor: servisKlasor,
+        gorunur,
+        kapat: true,
+        log: (m) => console.log('    · ' + m),
+      });
+    } catch (e) {
+      dogrudan = e;
+    }
+    kontrol('doğrudan dosya veren adres pencere açmadan indiriliyor',
+      dogrudan && dogrudan.dosya && fs.existsSync(dogrudan.dosya)
+      && fs.readFileSync(dogrudan.dosya, 'utf8') === 'dogrudan-inen-icerik'
+      && dogrudan.ad === 'bina_tipi.xlsx' && kayit.ososDogrudan === 1
+      && BW.getAllWindows().length === 0,
+      dogrudan && (dogrudan.ad || dogrudan.message));
+
+    let adsiz = null;
+    try {
+      adsiz = await servisIndir.indir({
+        url: `${kok}/osos-adsiz`, klasor: path.join(servisKlasor, 'adsiz'),
+        gorunur, kapat: true, log: () => { },
+      });
+    } catch (e) {
+      adsiz = e;
+    }
+    kontrol('dosya adı yoksa adres yolundan ad türetiliyor',
+      adsiz && adsiz.dosya && fs.existsSync(adsiz.dosya)
+      && adsiz.ad === servisIndir.VARSAYILAN_DOSYA,
+      adsiz && (adsiz.ad || adsiz.message));
+
+    kontrol('dosya adı Content-Disposition biçimlerinden okunuyor',
+      servisIndir.dosyaAdiCoz({ 'content-disposition': 'attachment; filename="a b.xlsx"' },
+        'http://x/y') === 'a b.xlsx'
+      && servisIndir.dosyaAdiCoz(
+        { 'content-disposition': "attachment; filename*=UTF-8''rapor%20%C3%A7.xlsx" },
+        'http://x/y') === 'rapor ç.xlsx'
+      && servisIndir.dosyaAdiCoz({}, 'http://x/yol/dosya.xlsx') === 'dosya.xlsx'
+      && servisIndir.dosyaAdiCoz({}, 'http://x/osos') === servisIndir.VARSAYILAN_DOSYA,
+      servisIndir.dosyaAdiCoz({ 'content-disposition': 'attachment; filename="a b.xlsx"' },
+        'http://x/y'));
+
+    kontrol('sayfa yanıtı dosya sayılmıyor',
+      servisIndir.dosyaYaniti({ 'content-type': 'text/html; charset=utf-8' }) === false
+      && servisIndir.dosyaYaniti({ 'content-type': 'application/octet-stream' }) === true
+      && servisIndir.dosyaYaniti({ 'content-type': 'text/html', 'content-disposition': 'attachment' }) === true);
 
     let secicili = null;
     try {

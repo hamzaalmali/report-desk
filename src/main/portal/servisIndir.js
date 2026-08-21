@@ -3,7 +3,8 @@
 'use strict';
 
 const fs = require('node:fs');
-const { BrowserWindow, session } = require('electron');
+const path = require('node:path');
+const { BrowserWindow, session, net } = require('electron');
 
 const { YARDIM, indirmeyiIzle } = require('./portal');
 
@@ -11,6 +12,10 @@ const BOLME = 'persist:portal';
 const VARSAYILAN_SAYFA_MS = 180000;
 const INDIRME_SURESI = 180000;
 const DUGMESIZ_BEKLEME = 3000;
+const DOGRUDAN_SURESI = 120000;
+const EN_BUYUK_DOSYA = 200 * 1024 * 1024;
+const VARSAYILAN_DOSYA = 'osos_rapor.xlsx';
+const SAYFA_TURU = /^(text\/html|application\/xhtml)/i;
 
 const DUGME_DESENI = 'excel|indir|olustur|oluştur|rapor|getir|listele|download';
 
@@ -55,6 +60,111 @@ function adresiCoz(url, aralik) {
     .replace(/\{son\}/gi, encodeURIComponent(son));
 }
 
+function benzersizYol(klasor, ad) {
+  let hedef = path.join(klasor, ad);
+  const uzanti = path.extname(ad);
+  const govde = ad.slice(0, ad.length - uzanti.length);
+  let n = 2;
+  while (fs.existsSync(hedef)) {
+    hedef = path.join(klasor, `${govde}-${n++}${uzanti}`);
+  }
+  return hedef;
+}
+
+function dosyaAdiCoz(basliklar, url) {
+  const ham = String((basliklar && (basliklar['content-disposition']
+    || basliklar['Content-Disposition'])) || '');
+  const yildizli = ham.match(/filename\*\s*=\s*[^']*''([^;]+)/i);
+  if (yildizli) {
+    try { return path.basename(decodeURIComponent(yildizli[1].trim())); } catch { }
+  }
+  const duz = ham.match(/filename\s*=\s*"([^"]+)"/i) || ham.match(/filename\s*=\s*([^;]+)/i);
+  if (duz) {
+    const ad = path.basename(duz[1].trim());
+    if (ad) return ad;
+  }
+  try {
+    const ad = path.basename(new URL(url).pathname);
+    if (ad && ad.includes('.')) return ad;
+  } catch { }
+  return VARSAYILAN_DOSYA;
+}
+
+function dosyaYaniti(basliklar) {
+  const tur = String((basliklar && (basliklar['content-type']
+    || basliklar['Content-Type'])) || '');
+  const ek = String((basliklar && (basliklar['content-disposition']
+    || basliklar['Content-Disposition'])) || '');
+  if (/attachment/i.test(ek)) return true;
+  if (!tur) return false;
+  return !SAYFA_TURU.test(tur.split(';')[0].trim());
+}
+
+function tekDeger(v) {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function basliklariDuzle(ham) {
+  const cikti = {};
+  for (const [a, d] of Object.entries(ham || {})) cikti[a.toLowerCase()] = tekDeger(d);
+  return cikti;
+}
+
+function dogrudanIndir(hedefUrl, klasor, oturum, log) {
+  return new Promise((coz, red) => {
+    let istek;
+    try {
+      istek = net.request({ url: hedefUrl, session: oturum, useSessionCookies: true });
+    } catch (e) {
+      return coz(null);
+    }
+    const sayac = setTimeout(() => {
+      try { istek.abort(); } catch { }
+      red(new Error('OSOS servisi yanıt vermedi (süre doldu).'));
+    }, DOGRUDAN_SURESI);
+    const bitir = (fn, deger) => { clearTimeout(sayac); fn(deger); };
+
+    istek.on('error', (e) => bitir(red,
+      new Error(`OSOS servisine ulaşılamadı: ${e.message}`)));
+
+    istek.on('response', (yanit) => {
+      const basliklar = basliklariDuzle(yanit.headers);
+      if (yanit.statusCode >= 400) {
+        yanit.on('data', () => { });
+        yanit.on('end', () => { });
+        return bitir(red, new Error(
+          `OSOS servisi ${yanit.statusCode} yanıtı verdi (${hedefUrl}).`));
+      }
+      if (!dosyaYaniti(basliklar)) {
+        yanit.on('data', () => { });
+        yanit.on('end', () => bitir(coz, null));
+        return null;
+      }
+      const parcalar = [];
+      let boyut = 0;
+      yanit.on('data', (p) => {
+        boyut += p.length;
+        if (boyut > EN_BUYUK_DOSYA) {
+          try { istek.abort(); } catch { }
+          return bitir(red, new Error('OSOS servisinden gelen dosya beklenenden büyük.'));
+        }
+        parcalar.push(p);
+        return null;
+      });
+      yanit.on('end', () => {
+        if (!boyut) return bitir(coz, null);
+        const ad = dosyaAdiCoz(basliklar, hedefUrl);
+        const hedef = benzersizYol(klasor, ad);
+        fs.writeFileSync(hedef, Buffer.concat(parcalar));
+        log(`OSOS servisi: adres doğrudan dosya verdi (${ad}).`);
+        return bitir(coz, { dosya: hedef, ad: path.basename(hedef), boyut });
+      });
+      return null;
+    });
+    istek.end();
+  });
+}
+
 async function indir({
   url, klasor, dugme = '', aralik = null,
   sayfaMs = VARSAYILAN_SAYFA_MS, gorunur = false, kapat = true, log = () => { },
@@ -62,6 +172,11 @@ async function indir({
   if (!url) throw new Error('OSOS servisi adresi tanımlı değil.');
   fs.mkdirSync(klasor, { recursive: true });
   const hedefUrl = adresiCoz(url, aralik);
+  const oturum = session.fromPartition(BOLME);
+
+  const dogrudan = await dogrudanIndir(hedefUrl, klasor, oturum, log);
+  if (dogrudan) return dogrudan;
+  log('OSOS servisi: adres sayfa döndürdü, indirme düğmesi aranacak.');
 
   const pencere = new BrowserWindow({
     width: 1100,
@@ -78,7 +193,6 @@ async function indir({
     },
   });
 
-  const oturum = session.fromPartition(BOLME);
   const indirme = indirmeyiIzle(oturum, klasor);
   let indi = false;
   const sozu = indirme.sonraki().then((d) => { indi = true; return d; });
@@ -86,7 +200,11 @@ async function indir({
   let hataOldu = false;
 
   try {
-    await pencere.loadURL(hedefUrl);
+    try {
+      await pencere.loadURL(hedefUrl);
+    } catch (e) {
+      if (!/ERR_ABORTED/.test(e.message || '')) throw e;
+    }
     await uyu(DUGMESIZ_BEKLEME);
 
     if (!indi) {
@@ -125,4 +243,6 @@ async function indir({
   }
 }
 
-module.exports = { indir, adresiCoz, DUGME_DESENI };
+module.exports = {
+  indir, adresiCoz, dosyaAdiCoz, dosyaYaniti, DUGME_DESENI, VARSAYILAN_DOSYA,
+};
