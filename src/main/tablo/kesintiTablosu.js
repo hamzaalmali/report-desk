@@ -83,6 +83,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
     anaBasliklar.push({ ad: EK_TABLET, anahtar: key(EK_TABLET), genislik: 40 });
     tabletSutun = anaBasliklar.length - 1;
 
+    let okunamayan = 0;
     anaSatirlar = ana.satirlar.map((s) => {
       const yeni = s.slice(0, ilk9);
       while (yeni.length < aboneSutun) yeni.push(null);
@@ -90,6 +91,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
       for (const i of dokuzlar) {
         const v = sayi(s[i]);
         if (v != null) toplam = (toplam || 0) + v;
+        else if (s[i] != null && String(s[i]).trim() !== '') okunamayan++;
       }
       yeni[aboneSutun] = toplam == null ? null : Math.round(toplam);
       let tablet = anaTablet >= 0 ? s[anaTablet] : null;
@@ -100,8 +102,17 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
       yeni[tabletSutun] = tablet == null ? null : tablet;
       return yeni;
     });
-    log(`Kesinti tablosu: ${dokuzlar.length} abone sütunu (9A–9F) toplanıp `
-      + '"Toplam Abone" yazıldı, aradaki sütunlar atıldı.');
+    log(`Kesinti tablosu: ${dokuzlar.length} abone sütunu toplanıp "Toplam Abone" yazıldı: `
+      + dokuzlar.map((i) => ana.basliklar[i].ad).join(' + '));
+    if (okunamayan) {
+      log(`Kesinti tablosu: abone sütunlarında ${okunamayan} hücre sayıya çevrilemedi `
+        + 've toplama girmedi.');
+    }
+    const eksikler = ['9A', '9B', '9C', '9D', '9E', '9F']
+      .filter((e) => !dokuzlar.some((i) => (ana.basliklar[i].ad || '').includes(e)));
+    if (eksikler.length) {
+      log(`Kesinti tablosu: listede bulunamayan abone sütunları toplama girmedi: ${eksikler.join(', ')}`);
+    }
   } else {
     anaBasliklar = ana.basliklar.slice();
     aboneSutun = sutunBul(anaBasliklar, ABONE_DESEN);

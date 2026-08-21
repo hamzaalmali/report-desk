@@ -22,7 +22,7 @@ function sayi(v) {
   if (v == null || v === '') return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'object') return sayi(v.result != null ? v.result : v.text);
-  let s = String(v).trim();
+  let s = String(v).replace(/[\s\u00a0\u202f]/g, '');
   if (!s) return null;
   if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(s)) s = s.replace(/\./g, '');
   if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');

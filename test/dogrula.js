@@ -610,10 +610,11 @@ async function main() {
     const ExcelJS = require('exceljs');
     const tablo = require('../src/main/tablo/kesintiTablosu');
 
-    kontrol('sayı çözümü Türkçe biçimleri anlıyor',
+    kontrol('sayı çözümü Türkçe biçimleri ve boşluklu yazımı anlıyor',
       tablo.sayi('0,321') === 0.321 && tablo.sayi('1.250') === 1250
       && tablo.sayi('1.506,115') === 1506.115 && tablo.sayi(10.4) === 10.4
-      && tablo.sayi('') === null && tablo.sayi('abc') === null,
+      && tablo.sayi('1 250') === 1250 && tablo.sayi('1\u00a0250') === 1250
+      && tablo.sayi('') === null && tablo.sayi('   ') === null && tablo.sayi('abc') === null,
       [tablo.sayi('0,321'), tablo.sayi('1.250'), tablo.sayi('1.506,115')].join(' | '));
     kontrol('yazım farkları aynı anahtara iniyor',
       tablo.duz('Dagitim Transformatörü') === tablo.duz('Dağıtım Transformatörü')
