@@ -20,9 +20,13 @@ function oku(klasor) {
   return null;
 }
 
+const SAPMA_SINIRI = 2 * 60 * 1000;
+
 function durum(klasor, ben) {
   const k = oku(klasor);
-  if (!k) return { sahip: null, benMiyim: false, taze: false, dakika: null, bos: true };
+  if (!k) {
+    return { sahip: null, benMiyim: false, taze: false, dakika: null, bos: true, sapma: false };
+  }
   const gecen = Date.now() - (k.zaman || 0);
   const taze = gecen < TAZELIK;
   return {
@@ -31,6 +35,7 @@ function durum(klasor, ben) {
     taze,
     dakika: Math.max(0, Math.round(gecen / 60000)),
     bos: !taze,
+    sapma: gecen < -SAPMA_SINIRI,
   };
 }
 
@@ -42,9 +47,15 @@ function alinabilirMi(klasor, ben) {
 function al(klasor, ben) {
   fs.mkdirSync(klasor, { recursive: true });
   const hedef = yol(klasor);
+  const icerik = JSON.stringify({ makine: ben, zaman: Date.now() });
   const gecici = `${hedef}.${process.pid}.yeni`;
-  fs.writeFileSync(gecici, JSON.stringify({ makine: ben, zaman: Date.now() }));
-  fs.renameSync(gecici, hedef);
+  try {
+    fs.writeFileSync(gecici, icerik);
+    fs.renameSync(gecici, hedef);
+  } catch {
+    try { fs.unlinkSync(gecici); } catch { }
+    fs.writeFileSync(hedef, icerik);
+  }
   return durum(klasor, ben);
 }
 
@@ -62,4 +73,4 @@ function birak(klasor, ben) {
   return durum(klasor, ben);
 }
 
-module.exports = { durum, alinabilirMi, al, tazele, birak, TAZELIK, DOSYA };
+module.exports = { durum, alinabilirMi, al, tazele, birak, TAZELIK, SAPMA_SINIRI, DOSYA };

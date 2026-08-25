@@ -15,6 +15,7 @@ let dinleyici = () => { };
 let kapatiliyor = false;
 let komutIsleyici = null;
 let gunlukYaz = () => { };
+let devirIsleyici = () => { };
 const sonKomut = new Map();
 let yenidenDeneme = 0;
 let zamanlayici = null;
@@ -45,32 +46,91 @@ function gunluk(metin) {
   try { gunlukYaz(metin); } catch { }
 }
 
-function kur(klasor, olayFn, komutFn, logFn) {
+const SURUM_DOSYASI = 'surum.json';
+const SURUM_ZAMAN_ASIMI = 5000;
+const SURUM_TAZELIK = 12 * 60 * 60 * 1000;
+
+function surumOnbellegiOku() {
+  try {
+    const k = JSON.parse(fs.readFileSync(path.join(oturumYolu, SURUM_DOSYASI), 'utf8'));
+    if (Array.isArray(k.surum) && k.surum.length === 3) return k;
+  } catch { }
+  return null;
+}
+
+function surumOnbellegiYaz(surum) {
+  try {
+    fs.writeFileSync(
+      path.join(oturumYolu, SURUM_DOSYASI),
+      JSON.stringify({ surum, zaman: Date.now() })
+    );
+  } catch { }
+}
+
+async function surumBul(b) {
+  const onbellek = surumOnbellegiOku();
+  if (onbellek && Date.now() - (onbellek.zaman || 0) < SURUM_TAZELIK) return onbellek.surum;
+
+  try {
+    const sonuc = await Promise.race([
+      b.fetchLatestBaileysVersion(),
+      new Promise((_, red) => setTimeout(() => red(new Error('zaman aşımı')), SURUM_ZAMAN_ASIMI)),
+    ]);
+    if (sonuc && sonuc.isLatest && Array.isArray(sonuc.version)) {
+      surumOnbellegiYaz(sonuc.version);
+      return sonuc.version;
+    }
+    if (sonuc && Array.isArray(sonuc.version)) return sonuc.version;
+  } catch {
+    gunluk('WhatsApp sürüm sorgusu yanıt vermedi, gömülü sürümle devam ediliyor.');
+  }
+  if (onbellek) return onbellek.surum;
+  return undefined;
+}
+
+function kur(klasor, olayFn, komutFn, logFn, devirFn) {
   oturumYolu = klasor;
   if (olayFn) dinleyici = olayFn;
   if (komutFn) komutIsleyici = komutFn;
   if (logFn) gunlukYaz = logFn;
+  if (devirFn) devirIsleyici = devirFn;
   fs.mkdirSync(oturumYolu, { recursive: true });
   bildir({ asama: oturumVarMi() ? 'kapali' : 'kapali' });
+}
+
+function uyar(metin) {
+  bildir({ hata: metin || null });
 }
 
 function durumAl() {
   return { ...durum, oturumVar: oturumVarMi(), yol: oturumYolu };
 }
 
-async function baslat() {
+async function baslat(otomatik = false) {
   if (sock) return durumAl();
   kapatiliyor = false;
   clearTimeout(zamanlayici);
+  if (!otomatik) yenidenDeneme = 0;
   bildir({ asama: 'baglaniyor', qr: null, hata: null });
 
+  try {
+    return await soketAc();
+  } catch (e) {
+    sock = null;
+    bildir({ asama: 'hata', qr: null, hata: `Bağlantı başlatılamadı: ${e.message}` });
+    gunluk(`WhatsApp başlatılamadı: ${e.message}`);
+    throw e;
+  }
+}
+
+async function soketAc() {
   const mod = await import('@whiskeysockets/baileys');
   const b = mod.default && mod.default.makeWASocket ? mod.default : mod;
   const makeWASocket = b.makeWASocket || b.default || mod.default;
-  const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = b;
+  const { useMultiFileAuthState, DisconnectReason } = b;
 
   const { state, saveCreds } = await useMultiFileAuthState(oturumYolu);
-  const { version } = await fetchLatestBaileysVersion();
+  const version = await surumBul(b);
 
   sock = makeWASocket({
     version,
@@ -116,21 +176,51 @@ async function baslat() {
       if (kapatiliyor) { bildir({ asama: 'kapali', qr: null, numara: null, ad: null }); return; }
 
       if (kod === DisconnectReason.loggedOut) {
+        gunluk('WhatsApp oturumu telefondan kapatılmış (401), oturum dosyaları siliniyor.');
         oturumuTemizle();
         bildir({ asama: 'kapali', qr: null, numara: null, ad: null,
           hata: 'Oturum telefondan kapatılmış. Yeniden QR okutun.' });
         return;
       }
 
+      if (kod === DisconnectReason.connectionReplaced) {
+        gunluk('WhatsApp oturumu başka bir cihaza geçti (440), bağlantı bırakıldı.');
+        bildir({ asama: 'kapali', qr: null, numara: null, ad: null,
+          hata: 'Oturum başka bir bilgisayarda açıldı. Buradan bağlanmak için önce orada '
+            + '"Bağlantıyı kes" deyin.' });
+        try { devirIsleyici(); } catch { }
+        return;
+      }
+
+      if (kod === DisconnectReason.forbidden || kod === DisconnectReason.multideviceMismatch) {
+        bildir({
+          asama: 'hata', qr: null,
+          hata: kod === DisconnectReason.forbidden
+            ? 'WhatsApp bu hesapla bağlanmayı reddetti (403). Numara kısıtlanmış olabilir.'
+            : 'Telefondaki WhatsApp sürümü uyumsuz (411). Telefonda güncelleyip tekrar deneyin.',
+        });
+        return;
+      }
+
+      if (kod === DisconnectReason.restartRequired) {
+        gunluk('WhatsApp yeniden başlatma istedi (515), hemen bağlanılıyor.');
+        bildir({ asama: 'baglaniyor', qr: null, hata: null });
+        zamanlayici = setTimeout(() => { baslat(true).catch(() => { }); }, 500);
+        return;
+      }
+
       yenidenDeneme++;
       if (yenidenDeneme > 5) {
-        bildir({ asama: 'hata', qr: null, hata: 'Bağlantı kurulamadı, 5 deneme başarısız.' });
+        bildir({ asama: 'hata', qr: null,
+          hata: `Bağlantı kurulamadı, 5 deneme başarısız (son kod: ${kod || 'bilinmiyor'}). `
+            + 'Ağ ya da güvenlik duvarı WhatsApp bağlantısını engelliyor olabilir. '
+            + '"Bağlan" ile yeniden deneyebilirsiniz.' });
         return;
       }
       const bekle = Math.min(30000, 2000 * yenidenDeneme);
       bildir({ asama: 'baglaniyor', qr: null,
         hata: `Bağlantı koptu (${kod || 'bilinmiyor'}), ${bekle / 1000} sn sonra yeniden denenecek.` });
-      zamanlayici = setTimeout(() => { baslat().catch(() => { }); }, bekle);
+      zamanlayici = setTimeout(() => { baslat(true).catch(() => { }); }, bekle);
     }
   });
 
@@ -303,6 +393,7 @@ function oturumuTemizle() {
 
 async function durdur() {
   kapatiliyor = true;
+  yenidenDeneme = 0;
   clearTimeout(zamanlayici);
   if (sock) {
     try { sock.end(undefined); } catch { }
@@ -314,6 +405,7 @@ async function durdur() {
 
 async function cikisYap() {
   kapatiliyor = true;
+  yenidenDeneme = 0;
   clearTimeout(zamanlayici);
   if (sock) {
     try { await sock.logout(); } catch { }
@@ -394,5 +486,5 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
   gruplariGetir, belgeGonder, topluBelgeGonder, dosyaTuru,
-  gonderenNumara, mesajMetni, gonder, sor, soruDusur,
+  gonderenNumara, mesajMetni, gonder, sor, soruDusur, uyar,
 };

@@ -105,6 +105,8 @@ function pencereOlustur() {
     pencere.show();
   };
 
+  pencere.on('focus', () => esitlemeyiPlanla(1000));
+
   pencere.once('ready-to-show', () => goster('ready-to-show'));
   pencere.webContents.once('did-finish-load', () => goster('did-finish-load'));
   setTimeout(() => goster('zaman aşımı'), 4000);
@@ -267,7 +269,18 @@ app.whenReady().then(() => {
   ortak.kur(app.getPath('userData'));
   pencereOlustur();
   veritabaniniAc();
+  if (!dbHatasi) {
+    try {
+      db.degisiklikDinle(() => {
+        if (esitlemeCalisiyor) return;
+        esitlemeyiPlanla(DEGISIKLIK_GECIKMESI);
+      });
+    } catch (e) {
+      hataYaz('değişiklik dinleyicisi', e);
+    }
+  }
   zamanlayiciyiKur();
+  esitlemeyiPlanla(2000);
   try {
     guncellemeyiKur(() => pencere);
   } catch (e) {
@@ -348,10 +361,38 @@ function ortakAnahtar() {
   }
 }
 
+const ORTAK_SIRLAR = [
+  ['mailSifre', 'mailSifreSema'],
+  ['postaSifre', 'postaSifreSema'],
+  ['portalKayitToken', 'portalKayitTokenSema'],
+];
+
+function sirlariOrtaklastir() {
+  let sayi = 0;
+  for (const [anahtar, semaAnahtari] of ORTAK_SIRLAR) {
+    try {
+      const deger = db.ortakAyarOku(anahtar);
+      if (!deger) continue;
+      if (Number(db.ortakAyarOku(semaAnahtari)) !== kasa.YEREL) continue;
+      const acik = kasa.coz(deger, kasa.YEREL);
+      const yeni = kasa.sifrele(acik);
+      if (yeni.sifreli !== kasa.ORTAK) continue;
+      db.ortakAyarYaz(anahtar, yeni.deger);
+      db.ortakAyarYaz(semaAnahtari, String(yeni.sifreli));
+      sayi++;
+    } catch {
+      kayit(`"${anahtar}" bu bilgisayarda çözülemedi, ortak anahtara taşınamadı.`);
+    }
+  }
+  if (sayi) kayit(`${sayi} kayıtlı şifre ortak anahtarla yeniden şifrelendi.`);
+  return sayi;
+}
+
 function hesaplariOrtaklastir() {
   if (!ortakAnahtar()) return 0;
   let sayi = 0;
   try {
+    sirlariOrtaklastir();
     for (const h of db.raw.all(
       'SELECT id, numara, sifre, sifreli FROM portal_hesap WHERE sifreli = :y',
       { ':y': kasa.YEREL }
@@ -409,14 +450,33 @@ function waKalbiDurdur() {
   waKalpAtisi = null;
 }
 
+const WA_NOBET_ARALIGI = 20000;
+
 function waKalbiBaslat() {
   waKalbiDurdur();
   if (!waOrtakMi()) return;
   waKalpAtisi = setInterval(() => {
     try {
-      if (wa.durumAl().asama === 'bagli') sahiplik.tazele(waOturumKlasoru(), ortak.makineAdi());
+      const asama = wa.durumAl().asama;
+      if (asama === 'kapali' || asama === 'hata') return;
+      const klasor = waOturumKlasoru();
+      const ben = ortak.makineAdi();
+      const d = sahiplik.durum(klasor, ben);
+
+      if (d.sahip && !d.benMiyim && d.taze && !d.sapma) {
+        kayit(`WhatsApp oturumu "${d.sahip}" bilgisayarına devredildi, buradaki bağlantı kapatılıyor.`);
+        waKalbiDurdur();
+        wa.durdur()
+          .then(() => wa.uyar(`Oturum "${d.sahip}" bilgisayarına alındı, bağlantı burada kapatıldı.`))
+          .catch((e) => hataYaz('whatsapp devir', e));
+        return;
+      }
+      if (d.sapma) {
+        kayit(`WhatsApp sahiplik damgası ileri tarihli ("${d.sahip}"); iki bilgisayarın saati tutmuyor.`);
+      }
+      if (asama === 'bagli') sahiplik.tazele(klasor, ben);
     } catch { }
-  }, 60000);
+  }, WA_NOBET_ARALIGI);
 }
 
 function waKur() {
@@ -438,7 +498,8 @@ function waKur() {
         bina: (b) => waIsKomutu(ISLER.bina, b),
       },
     }),
-    kayit
+    kayit,
+    () => waKalbiDurdur()
   );
   return klasor;
 }
@@ -466,6 +527,12 @@ async function waBaslatKontrollu(zorla = false) {
 }
 
 app.on('before-quit', () => {
+  clearTimeout(planSayaci);
+  planSayaci = null;
+  try {
+    if (ortak.ortakDosya() && !dbHatasi && !esitlemeCalisiyor) esitlemeyiCalistir(false);
+  } catch (e) { hataYaz('kapanış eşitlemesi', e); }
+  try { if (ortakIzleyici) ortakIzleyici.close(); } catch { }
   waKalbiDurdur();
   try {
     if (waOrtakMi() && wa.durumAl().asama !== 'kapali') {
@@ -1001,6 +1068,9 @@ function esitlemeyiCalistir(elle = false) {
   if (dbHatasi) throw new Error('Yerel veritabanı açık değil.');
 
   esitlemeCalisiyor = true;
+  sonKendiYazim = Date.now();
+  clearTimeout(planSayaci);
+  planSayaci = null;
   const basladi = Date.now();
   let baglanti = null;
   try {
@@ -1040,12 +1110,50 @@ function esitlemeyiCalistir(elle = false) {
     throw e;
   } finally {
     if (baglanti) baglanti.kapat();
+    sonKendiYazim = Date.now();
     esitlemeCalisiyor = false;
+  }
+}
+
+const DEGISIKLIK_GECIKMESI = 15000;
+const ORTAK_IZLEME_GECIKMESI = 3000;
+const KENDI_YAZIM_PAYI = 8000;
+
+let planSayaci = null;
+let sonKendiYazim = 0;
+let ortakIzleyici = null;
+
+function esitlemeyiPlanla(gecikme = DEGISIKLIK_GECIKMESI) {
+  if (!ortak.ortakDosya() || dbHatasi) return;
+  clearTimeout(planSayaci);
+  planSayaci = setTimeout(() => {
+    planSayaci = null;
+    if (esitlemeCalisiyor) { esitlemeyiPlanla(2000); return; }
+    try { esitlemeyiCalistir(false); } catch { }
+  }, gecikme);
+}
+
+function ortakIzlemeyiKur() {
+  if (ortakIzleyici) { try { ortakIzleyici.close(); } catch { } ortakIzleyici = null; }
+  const dosya = ortak.ortakDosya();
+  if (!dosya) return;
+  const ad = path.basename(dosya);
+  try {
+    ortakIzleyici = fs.watch(path.dirname(dosya), (_olay, degisen) => {
+      if (degisen && !String(degisen).startsWith(ad)) return;
+      if (esitlemeCalisiyor) return;
+      if (Date.now() - sonKendiYazim < KENDI_YAZIM_PAYI) return;
+      esitlemeyiPlanla(ORTAK_IZLEME_GECIKMESI);
+    });
+    ortakIzleyici.on('error', () => { });
+  } catch (e) {
+    kayit(`Ortak dosya izlenemedi (aralıklı eşitleme sürüyor): ${e.message}`);
   }
 }
 
 function zamanlayiciyiKur() {
   clearInterval(esitlemeSayaci);
+  ortakIzlemeyiKur();
   if (!ortak.ortakDosya()) return;
   esitlemeSayaci = setInterval(() => {
     try { esitlemeyiCalistir(false); } catch { }

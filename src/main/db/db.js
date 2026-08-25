@@ -56,12 +56,35 @@ function yenidenDene(fn) {
   }
 }
 
-function ifadeSarmala(ifade) {
+const ESITLENEN = /\b(isletme|eslesme|gun_kategori|kayit|vardiya_ekip|vardiya_personel|vardiya_kayit|ortak_ayar|portal_hesap|oneri|wa_grup|silinen)\b/i;
+const YAZAN = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
+
+let degisiklikDinleyici = null;
+
+function degisiklikDinle(fn) {
+  degisiklikDinleyici = typeof fn === 'function' ? fn : null;
+}
+
+function degisiklikBildir(sql) {
+  if (!degisiklikDinleyici) return;
+  const m = String(sql || '');
+  if (!YAZAN.test(m) || !ESITLENEN.test(m)) return;
+  try { degisiklikDinleyici(); } catch { }
+}
+
+function ifadeSarmala(ifade, anaMi, sql) {
   return new Proxy(ifade, {
     get(hedef, ad) {
       const d = hedef[ad];
       if (typeof d !== 'function') return d;
-      if (ad === 'run' || ad === 'get' || ad === 'all') {
+      if (ad === 'run') {
+        return (...a) => {
+          const r = yenidenDene(() => d.apply(hedef, a));
+          if (anaMi) degisiklikBildir(sql);
+          return r;
+        };
+      }
+      if (ad === 'get' || ad === 'all') {
         return (...a) => yenidenDene(() => d.apply(hedef, a));
       }
       return d.bind(hedef);
@@ -69,15 +92,22 @@ function ifadeSarmala(ifade) {
   });
 }
 
-function sarmala(gercek) {
+function sarmala(gercek, anaMi = false) {
   return new Proxy(gercek, {
     get(hedef, ad) {
       const d = hedef[ad];
       if (typeof d !== 'function') return d;
       if (ad === 'prepare') {
-        return (...a) => ifadeSarmala(yenidenDene(() => d.apply(hedef, a)));
+        return (...a) => ifadeSarmala(yenidenDene(() => d.apply(hedef, a)), anaMi, a[0]);
       }
       if (!SARILACAK.has(ad)) return d.bind(hedef);
+      if (anaMi && (ad === 'run' || ad === 'exec')) {
+        return (...a) => {
+          const r = yenidenDene(() => d.apply(hedef, a));
+          degisiklikBildir(a[0]);
+          return r;
+        };
+      }
       return (...a) => yenidenDene(() => d.apply(hedef, a));
     },
   });
@@ -92,7 +122,7 @@ function ac(dosyaYolu) {
   dbYolu = dosyaYolu;
   fs.mkdirSync(path.dirname(dosyaYolu), { recursive: true });
   ham = new Database(dosyaYolu);
-  db = sarmala(ham);
+  db = sarmala(ham, true);
   db.run('PRAGMA foreign_keys = ON');
   kur();
   return db;
@@ -140,7 +170,7 @@ function semaKur(hedef) {
 function baglantiAc(dosyaYolu) {
   fs.mkdirSync(path.dirname(dosyaYolu), { recursive: true });
   const hamBaglanti = new Database(dosyaYolu);
-  const sarili = sarmala(hamBaglanti);
+  const sarili = sarmala(hamBaglanti, false);
   sarili.run('PRAGMA foreign_keys = ON');
   semaKur(sarili);
   kategorileriSenkronla(sarili);
@@ -916,6 +946,7 @@ function kapat() {
 
 module.exports = {
   ac, kur, yol, kapat, get raw() { return db; }, islem, bekleyisOzeti, baglantiAc,
+  degisiklikDinle,
   isletmeler, kategoriler, isletmeHaritasi, kategoriHaritasi,
   isletmeEkle, isletmeSil, isletmeSirala, isletmeTasi, isletmeSiralaAdlar,
   gunler, aylar, gunVerisi, ayVerisi,

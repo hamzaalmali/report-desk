@@ -11,6 +11,7 @@ const ALANLAR = [
 ];
 
 const YEREL_ALAN = 'mailYedekKlasor';
+const ORTAK_ALAN = 'mailYedekKlasor';
 
 function coz(tur, deger, varsayilan, enAz) {
   if (deger == null || deger === '') return varsayilan;
@@ -28,7 +29,8 @@ function oku(db) {
   for (const f of ALANLAR) {
     a[f.ad] = coz(f.tur, db.ortakAyarOku(f.anahtar), f.varsayilan, f.enAz);
   }
-  a.yedekKlasor = db.ayarOku(YEREL_ALAN, '') || '';
+  a.yedekKlasor = (db.ayarOku(YEREL_ALAN, '') || '')
+    || (db.ortakAyarOku(ORTAK_ALAN, '') || '');
   return a;
 }
 
@@ -40,7 +42,9 @@ function yaz(db, gelen) {
       f.tur === 'evet' ? (d ? '1' : '0') : String(d == null ? '' : d).trim());
   }
   if (Object.prototype.hasOwnProperty.call(gelen, 'yedekKlasor')) {
-    db.ayarYaz(YEREL_ALAN, String(gelen.yedekKlasor == null ? '' : gelen.yedekKlasor).trim());
+    const yol = String(gelen.yedekKlasor == null ? '' : gelen.yedekKlasor).trim();
+    db.ayarYaz(YEREL_ALAN, yol);
+    if (yol) db.ortakAyarYaz(ORTAK_ALAN, yol);
   }
   return oku(db);
 }

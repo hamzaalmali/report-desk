@@ -1177,11 +1177,26 @@ async function main() {
     const yazilan = mailAyar.yaz(sahteDb, {
       kullanici: ' ornek@gmail.com ', klasor: 'INBOX', yedekKlasor: '/tmp/yedek',
     });
-    kontrol('hesap ayarı ortak, yedek klasörü yerel tabloda duruyor',
+    kontrol('hesap ayarı ve yedek klasörü hem ortakta hem yerelde',
       yazilan.kullanici === 'ornek@gmail.com' && yazilan.sunucu === 'imap.gmail.com'
-      && sahteDb.ortak.has('mailKullanici') && !sahteDb.ortak.has(mailAyar.YEREL_ALAN)
+      && sahteDb.ortak.has('mailKullanici')
+      && sahteDb.ortak.get(mailAyar.YEREL_ALAN) === '/tmp/yedek'
       && sahteDb.yerel.get(mailAyar.YEREL_ALAN) === '/tmp/yedek',
       JSON.stringify([...sahteDb.ortak.keys()]));
+
+    const bosDb = (() => {
+      const ortak = new Map([[mailAyar.YEREL_ALAN, '\\\\sunucu\\ortak\\yedek']]);
+      const yerel = new Map();
+      return {
+        ortakAyarOku: (a, v = null) => (ortak.has(a) ? ortak.get(a) : v),
+        ortakAyarYaz: (a, d) => ortak.set(a, d),
+        ayarOku: (a, v = null) => (yerel.has(a) ? yerel.get(a) : v),
+        ayarYaz: (a, d) => yerel.set(a, d),
+      };
+    })();
+    kontrol('yerelde yol yoksa ortak yedek klasörü kullanılıyor',
+      mailAyar.oku(bosDb).yedekKlasor === '\\\\sunucu\\ortak\\yedek',
+      mailAyar.oku(bosDb).yedekKlasor);
     kontrol('eksik ayar ve silme öncesi kontrolleri ayrı',
       mailAyar.dogrula(yazilan, false).join('|') === 'uygulama şifresi'
       && mailAyar.silmeyeHazir({ ...yazilan, yedekKlasor: '' }, true).join('|') === 'yedek klasörü',
@@ -1692,7 +1707,47 @@ async function main() {
     fs.writeFileSync(path.join(klasor, sahiplik.DOSYA), 'bozuk içerik');
     kontrol('bozuk sahip dosyası kilit yaratmıyor', sahiplik.alinabilirMi(klasor, 'A-PC'));
 
+    sahiplik.al(klasor, 'A-PC');
+    const ileri = JSON.parse(fs.readFileSync(path.join(klasor, sahiplik.DOSYA), 'utf8'));
+    fs.writeFileSync(path.join(klasor, sahiplik.DOSYA),
+      JSON.stringify({ ...ileri, zaman: Date.now() + sahiplik.SAPMA_SINIRI + 60000 }));
+    const sapmaDurum = sahiplik.durum(klasor, 'B-PC');
+    kontrol('ileri tarihli damga saat farkı olarak işaretleniyor',
+      sapmaDurum.sapma === true && sapmaDurum.taze === true, JSON.stringify(sapmaDurum));
+    kontrol('normal damgada saat farkı işareti yok',
+      sahiplik.al(klasor, 'A-PC').sapma === false);
+
     fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
+  console.log('\nDeğişiklikte eşitleme tetiği');
+  {
+    const kok = fs.mkdtempSync(path.join(os.tmpdir(), 'rd-tetik-'));
+    const dbT = require('../src/main/db/db');
+    dbT.ac(path.join(kok, 'veri.sqlite'));
+    let sayi = 0;
+    dbT.degisiklikDinle(() => { sayi++; });
+
+    dbT.logYaz('2026-08-25', 'deneme', 'kayda değmez');
+    kontrol('eşitlenmeyen tabloya yazmak tetiklemiyor', sayi === 0, String(sayi));
+
+    dbT.ortakAyarYaz('deneme', '1');
+    kontrol('ortak ayar yazımı tetikliyor', sayi === 1, String(sayi));
+
+    const oncekiSayi = sayi;
+    dbT.raw.all('SELECT * FROM ortak_ayar');
+    kontrol('okuma tetiklemiyor', sayi === oncekiSayi, String(sayi));
+
+    dbT.isletmeEkle('TETİK İŞLETMESİ', 99);
+    kontrol('hazır ifadeyle yazım da tetikliyor', sayi > oncekiSayi, String(sayi));
+
+    dbT.degisiklikDinle(null);
+    const kapaliSayi = sayi;
+    dbT.ortakAyarYaz('deneme', '2');
+    kontrol('dinleyici kaldırılınca susuyor', sayi === kapaliSayi, String(sayi));
+
+    dbT.kapat();
+    fs.rmSync(kok, { recursive: true, force: true });
   }
 
   console.log('\nOrtak klasör ayarları');

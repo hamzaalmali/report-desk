@@ -1694,6 +1694,12 @@ function waOrtakBolumu(d) {
                  <span class="text-fg-3">· ${s.dakika} dk önce bildirdi</span>`
               : '<span class="text-fg-3">boşta</span>'}</span>
           </div>
+          ${s.sapma ? `
+            <div class="rounded-md border border-warn/40 bg-warn/10 p-3">
+              ${svg('uyari', 'inline size-3.5 -mt-0.5')}
+              <b>${kacar(s.sahip || '')}</b> bilgisayarının saati bu bilgisayardan ileride.
+              Sıranın kimde olduğu yanlış okunabilir; iki makinenin saatini eşitleyin.
+            </div>` : ''}
           ${baskasinda ? `
             <div class="rounded-md border border-warn/40 bg-warn/10 p-3">
               <div class="mb-2">Oturum <b>${kacar(s.sahip)}</b> bilgisayarında açık görünüyor.
@@ -1703,7 +1709,8 @@ function waOrtakBolumu(d) {
           <div class="rounded-md border border-line bg-bg-200 p-3 text-[12px] text-fg-3">
             Bir anda yalnızca <b class="text-fg-2">bir bilgisayar</b> bağlanabilir; diğerleri
             oturumun kimde olduğunu görür. Bağlantıyı kesince sıra boşa çıkar, 5 dakika ses
-            çıkmazsa da başka bilgisayar devralabilir.
+            çıkmazsa da başka bilgisayar devralabilir. Devraldığınızda öteki bilgisayar
+            en geç 20 saniye içinde kendi bağlantısını kapatır.
           </div>` : ''}
       </div>
     </div>`;
@@ -2994,8 +3001,13 @@ function baslat() {
       return;
     }
     if (v.alinan || v.yerelSilinen) {
+      if (D.sayfa === 'ayarlar') {
+        bildir(`Eşitleme: ${v.alinan} kayıt alındı. Ayarları görmek için sayfayı yeniden açın.`,
+          'basari');
+        return;
+      }
       bildir(`Eşitleme: ${v.alinan} kayıt alındı.`, 'basari');
-      if (D.sayfa !== 'ayarlar' && !duzenlemeVarMi()) git(D.sayfa).catch(() => { });
+      if (!duzenlemeVarMi()) git(D.sayfa).catch(() => { });
     }
   });
 
