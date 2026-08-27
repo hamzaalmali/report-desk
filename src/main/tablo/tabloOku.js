@@ -97,19 +97,32 @@ function sutunSec(basliklar, desenler, harfSira) {
   return -1;
 }
 
+const BASLIK_ADAY_SINIRI = 6;
+
 function sayfaOku(ws, kodDesenleri) {
   const sonSutun = Math.max(1, ws.actualColumnCount || 0, ws.columnCount || 0);
   const aramaSiniri = Math.min(Math.max(1, ws.actualRowCount || ws.rowCount || 1),
     EN_COK_BASLIK_ARAMA);
 
+  // Bazı raporlarda başlık iki katlı: üstte birleştirilmiş grup adları
+  // ("ETKİLENEN KULLANICI SAYISI (9)" dört sütuna yayılmış), altta asıl
+  // sütun adları ("OG (9A)", "AG (9B)" …). İkisi de kod desenini taşıdığı
+  // için ilkinde durursak tekrar eden grup adlarını sütun adı sanıyoruz.
+  // Ayırt edici: asıl başlık satırında adlar birbirinden farklıdır.
+  const adaylar = [];
+  for (let r = 1; r <= aramaSiniri; r++) {
+    const anahtarlar = satirAnahtarlari(ws, r, sonSutun);
+    if (sutunBul(anahtarlar, kodDesenleri) < 0) continue;
+    const adlar = anahtarlar.filter((b) => b.ad);
+    adaylar.push({ satir: r, farkli: new Set(adlar.map((b) => b.anahtar)).size });
+    if (adaylar.length >= BASLIK_ADAY_SINIRI) break;
+  }
+
   let baslikSatiri = 1;
   let kodVar = false;
-  for (let r = 1; r <= aramaSiniri; r++) {
-    if (sutunBul(satirAnahtarlari(ws, r, sonSutun), kodDesenleri) >= 0) {
-      baslikSatiri = r;
-      kodVar = true;
-      break;
-    }
+  if (adaylar.length) {
+    kodVar = true;
+    baslikSatiri = adaylar.reduce((en, a) => (a.farkli > en.farkli ? a : en)).satir;
   }
 
   const basliklar = satirAnahtarlari(ws, baslikSatiri, sonSutun)

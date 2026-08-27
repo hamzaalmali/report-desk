@@ -20,10 +20,14 @@ const ALAN = {
   basTarihAlt: 'ctl00_ContentPlaceHolder1_dateTimeBASLANGICTARIHI',
   sonTarihAlt: 'ctl00_ContentPlaceHolder1_dateTimeBITISTARIHI',
   saat: 'ctl00_ContentPlaceHolder1_cmbSAAT',
+  ilkSaat: 'ctl00_ContentPlaceHolder1_cmbILKSAAT',
+  sonSaat: 'ctl00_ContentPlaceHolder1_cmbSONSAAT',
   kaydet: 'ctl00_ContentPlaceHolder1_btnRaporKaydet_input',
   yenile: 'ctl00_ContentPlaceHolder1_btnRaporKuyrukYenile_input',
   indir: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporIndir_input',
   sil: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk_ctl00_ctl04_btnRaporSil_input',
+  jeton: 'CaptchaV3_hfRecaptchaToken',
+  girisHata: 'lblHataMesaj',
 };
 
 const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
@@ -34,10 +38,14 @@ const IL_KODU_DEGERI = 'Tümü';
 const TUMU_KUTULARI = [ALAN.ilKodu, ALAN.mudurlukKodu];
 const TUMU_DEGERLERI = [IL_KODU_DEGERI, 'TÜMÜ', 'Tumu', 'TUMU'];
 const BAS_TARIH_KUTULARI = [ALAN.basTarih, ALAN.basTarihAlt];
+// Saat kutusunun adı rapora göre değişiyor: bazı raporlarda tek cmbSAAT,
+// bazılarında cmbILKSAAT + cmbSONSAAT ikilisi. Var olanların hepsi doldurulur.
+const SAAT_KUTULARI = [ALAN.saat, ALAN.ilkSaat, ALAN.sonSaat];
 const SON_TARIH_KUTULARI = [ALAN.sonTarih, ALAN.sonTarihAlt];
 const VARSAYILAN_SAYFA_SN = 180;
 const OGE_SURESI = 30000;
 const INDIRME_SURESI = 180000;
+const JETON_SURESI = 20000;
 const EN_KISA_YENILEME = 5;
 
 const YARDIM = `
@@ -79,6 +87,14 @@ const YARDIM = `
     if (typeof e.click === 'function') { e.click(); return true; }
     try { e.dispatchEvent(new MouseEvent('click', { bubbles: true })); } catch (x) { }
     return true;
+  };
+  rd.kars = function (s) {
+    return String(s == null ? '' : s)
+      .normalize('NFC')
+      .replace(/[\u0130I\u0131]/g, 'i')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
   };
   rd.denetim = function (id) {
     try { return window.$find ? window.$find(id) : null; } catch (e) { return null; }
@@ -232,6 +248,11 @@ const YARDIM = `
         return (l.textContent || '').trim().toLowerCase() === String(deger).toLowerCase();
       })[0];
     }
+    if (!oge) {
+      oge = hepsi.filter(function (l) {
+        return rd.kars(l.textContent) === rd.kars(deger);
+      })[0];
+    }
     if (!oge) return null;
     rd.tikla(oge);
     return true;
@@ -242,13 +263,30 @@ const YARDIM = `
     var it = null;
     try { it = c.findItemByText ? c.findItemByText(deger) : null; } catch (e) { }
     if (!it) { try { it = c.findItemByValue ? c.findItemByValue(deger) : null; } catch (e) { } }
+    if (!it) {
+      try {
+        var hepsi = c.get_items();
+        for (var i = 0; i < hepsi.get_count(); i++) {
+          var a = hepsi.getItem(i);
+          if (rd.kars(a.get_text()) === rd.kars(deger)) { it = a; break; }
+        }
+      } catch (e) { }
+    }
     if (it) {
       try { c.trackChanges(); } catch (e) { }
       try { it.select(); } catch (e) { return null; }
       try { c.commitChanges(); } catch (e) { }
       return 'api';
     }
-    if (c.set_text) { try { c.set_text(deger); return 'metin'; } catch (e) { } }
+    // set_text yaziyi kutuya yazar ama oge SECMEZ; secili oge dogrulanmadan
+    // basari donmesi sessiz hataya yol aciyordu.
+    if (c.set_text) {
+      try {
+        c.set_text(deger);
+        var sec = c.get_selectedItem ? c.get_selectedItem() : null;
+        if (sec && rd.kars(sec.get_text()) === rd.kars(deger)) return 'metin';
+      } catch (e) { }
+    }
     return null;
   };
   rd.comboDeger = function (id) {
@@ -611,6 +649,35 @@ async function calistir(istek) {
     + ' return !!(o && window.__rd.gorunur(o)); })()';
   const GIRIS_VAR = `!!window.__rd.bul(${JSON.stringify(ALAN.giris)})`;
 
+  // reCAPTCHA v3: btnGiris'e basilinca jeton ASENKRON uretilip bu gizli alana yazilir,
+  // form ancak ondan sonra gonderilir. Beklemeden ilerlemek girisi sessizce dusuruyordu.
+  const JETON_DOLU = `(function () { var j = window.__rd.bul(${JSON.stringify(ALAN.jeton)});`
+    + ' return !j || !!(j.value && String(j.value).length > 20); })()';
+  const GIRIS_HATASI = `(function () { var h = window.__rd.bul(${JSON.stringify(ALAN.girisHata)});`
+    + ' return h && window.__rd.gorunur(h)'
+    + ' ? (h.innerText || h.textContent || "").replace(/\\s+/g, " ").trim() : ""; })()';
+
+  const jetonuBekle = async (sure = JETON_SURESI) => {
+    const bitis = Date.now() + sure;
+    while (Date.now() < bitis) {
+      kontrol();
+      for (const c of cerceveler()) {
+        if (await deneC(c, JETON_DOLU)) return true;
+      }
+      await uyu(200);
+    }
+    log('Portal: reCAPTCHA jetonu süresinde gelmedi; girişe yine de devam ediliyor.');
+    return false;
+  };
+
+  const girisHatasi = async () => {
+    for (const c of cerceveler()) {
+      const m = await deneC(c, GIRIS_HATASI);
+      if (m) return String(m);
+    }
+    return '';
+  };
+
   const girisiBekle = async (sure = Math.max(45000, sayfaMs)) => {
     const bitis = Date.now() + sure;
     while (Date.now() < bitis) {
@@ -627,10 +694,15 @@ async function calistir(istek) {
         if (await deneC(c, GIRIS_VAR)) { girisVar = true; break; }
       }
       if (!girisVar) { aktifCerceve = null; return 'gecti'; }
+      const mesaj = await girisHatasi();
+      if (mesaj) throw new Error(`Portal girişi reddetti: “${mesaj}”`);
       await uyu(300);
     }
+    const son = await girisHatasi();
     throw new Error('Giriş sonrası ekran gelmedi — hâlâ giriş sayfasındayız. '
-      + 'Kullanıcı adı veya şifre yanlış olabilir; kaydedilen HTML dosyasına bakın.');
+      + (son ? `Portalın mesajı: “${son}”` : 'Kullanıcı adı veya şifre yanlış olabilir, '
+        + 'ya da reCAPTCHA jetonu gelmemiş olabilir.')
+      + ' Kaydedilen HTML dosyasına bakın.');
   };
 
   let girisSonucu = null;
@@ -652,10 +724,12 @@ async function calistir(istek) {
         + ` ${JSON.stringify(hesap.sifre)})`);
       await uyu(200);
       await js(`window.__rd.tikla(window.__rd.bul(${JSON.stringify(ALAN.giris)}))`);
+      const jeton = await jetonuBekle();
       await uyu(1500);
       await sakinlesme();
       aktifCerceve = null;
       girisSonucu = await girisiBekle();
+      if (!jeton) log('Portal: giriş jetonsuz denendi.');
       return { sonuc: girisSonucu, url: pencere.webContents.getURL() };
     });
 
@@ -816,7 +890,13 @@ async function calistir(istek) {
       const son = await tarihDoldur(SON_TARIH_KUTULARI, aralik.son);
       await uyu(400);
 
-      const saatKutusu = await comboDoldur(ALAN.saat, [ayarlar.saat]);
+      let saatKutusu = null;
+      for (const kutu of SAAT_KUTULARI) {
+        const bulunan = await comboDoldur(kutu, [ayarlar.saat]);
+        if (!bulunan) continue;
+        if (!saatKutusu) saatKutusu = bulunan;
+        if (kutu !== ALAN.saat) log(`Portal: saat kutusu ${kutu} olarak dolduruldu.`);
+      }
 
       if (!bas || !son) {
         throw new Error('Tarih kutuları bulunamadı — bu raporun tarih alanları '

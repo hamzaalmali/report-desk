@@ -19,7 +19,11 @@ const REKORTMAN_EN_AZ_ABONE = 10;
 const EK_ABONE = 'Toplam Abone';
 const EK_TABLET = 'TABLET AÇIKLAMASI';
 
-const DOKUZLU = /\(9[A-F]\)/;
+// (9A)…(9F) abone sayısı sütunları. Aynı raporda "OG(10A)=(9A)X(8)" gibi
+// abone × süre sütunları da var ve onlar da "(9A)" metnini içeriyor; toplama
+// girerlerse abone sayısı katlanarak şişiyor. Bu yüzden başlık (9X) ile BİTMELİ.
+const DOKUZLU = /\(9[A-F]\)\s*$/;
+const CARPIM = /\(10[A-Z]?\)|X\s*\(8\)/;
 
 const KOD_DESEN = ['KESİNTİNİN KODU (1)', 'KOD NO (1)', 'KESİNTİ KODU', 'KOD NO'];
 const SURE_DESEN = ['KESİNTİ SÜRESİ'];
@@ -52,9 +56,25 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
   const dAbone = sutunBul(detay.basliklar, ABONE_DESEN);
   const dTablet = sutunBul(detay.basliklar, TABLET_DESEN);
 
+  // Detay raporunda da tek "Toplam Abone" sütunu olmayabilir; o zaman abone
+  // sayısı listedeki gibi (9A)…(9F) sütunlarına dağılmış olur.
+  const dDokuzlar = detay.basliklar
+    .map((b, i) => (DOKUZLU.test(b.ad || '') && !CARPIM.test(b.ad || '') ? i : -1))
+    .filter((i) => i >= 0);
+  const detayAboneVar = dAbone >= 0 || dDokuzlar.length > 0;
+  const detayAbone = (s) => {
+    if (dAbone >= 0) return sayi(s[dAbone]);
+    let t = null;
+    for (const i of dDokuzlar) {
+      const v = sayi(s[i]);
+      if (v != null) t = (t || 0) + v;
+    }
+    return t;
+  };
+
   if (anaKod < 0) throw new Error(`Kesinti listesinde kod sütunu bulunamadı (${path.basename(anaDosya)}).`);
   if (dKod < 0) throw new Error(`Detay raporunda kod sütunu bulunamadı (${path.basename(detayDosya)}).`);
-  for (const [ix, adx] of [[dAbone, 'abone'], [dTablet, 'tablet açıklaması'], [dIlce, 'ilçe']]) {
+  for (const [ix, adx] of [[detayAboneVar ? 0 : -1, 'abone'], [dTablet, 'tablet açıklaması'], [dIlce, 'ilçe']]) {
     if (ix < 0) log(`Kesinti tablosu: detay raporunda ${adx} sütunu bulunamadı, ilgili alanlar boş kalacak.`);
   }
   if (anaSure < 0) log('Kesinti tablosu: listede süre sütunu bulunamadı, süre sayfası boş kalacak.');
@@ -66,7 +86,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
   }
 
   const dokuzlar = ana.basliklar
-    .map((b, i) => (DOKUZLU.test(b.ad || '') ? i : -1))
+    .map((b, i) => (DOKUZLU.test(b.ad || '') && !CARPIM.test(b.ad || '') ? i : -1))
     .filter((i) => i >= 0);
 
   let anaBasliklar;
@@ -117,7 +137,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
     anaBasliklar = ana.basliklar.slice();
     aboneSutun = sutunBul(anaBasliklar, ABONE_DESEN);
     tabletSutun = sutunBul(anaBasliklar, TABLET_DESEN);
-    if (aboneSutun < 0 && dAbone >= 0) {
+    if (aboneSutun < 0 && detayAboneVar) {
       anaBasliklar.push({ ad: EK_ABONE, anahtar: key(EK_ABONE), genislik: 14 });
       aboneSutun = anaBasliklar.length - 1;
     }
@@ -131,8 +151,8 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
       while (yeni.length < anaBasliklar.length) yeni.push(null);
       const d = ilkKayit.get(kodMetni(s[anaKod]));
       if (d) {
-        if (aboneSutun >= ana.basliklar.length && dAbone >= 0) {
-          const v = sayi(d[dAbone]);
+        if (aboneSutun >= ana.basliklar.length && detayAboneVar) {
+          const v = detayAbone(d);
           yeni[aboneSutun] = v == null ? null : Math.round(v);
         }
         if (tabletSutun >= ana.basliklar.length && dTablet >= 0) yeni[tabletSutun] = d[dTablet];
@@ -165,7 +185,7 @@ async function olustur({ anaDosya, detayDosya, hedefKlasor, tarihMetni, log = ()
   const rekortman = (dNeden < 0 || dKaynak < 0) ? []
     : detay.satirlar.filter((s) => duz(s[dNeden]) === duz(REKORTMAN_NEDEN)
       && duz(s[dKaynak]) === duz(REKORTMAN_KAYNAK)
-      && (dAbone < 0 || (sayi(s[dAbone]) || 0) >= REKORTMAN_EN_AZ_ABONE));
+      && (!detayAboneVar || (detayAbone(s) || 0) >= REKORTMAN_EN_AZ_ABONE));
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Report Desk';

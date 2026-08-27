@@ -749,6 +749,76 @@ async function main() {
     fs.rmSync(klasor, { recursive: true, force: true });
   }
 
+  // Sahadan gelen gerçek rapor biçimi: başlık iki katlı ve abone sütunlarının
+  // yanında abone × süre sütunları var.
+  console.log('\nGerçek rapor biçimi (iki katlı başlık, çarpım sütunları)');
+  {
+    const ExcelJS = require('exceljs');
+    const { dosyaOku } = require('../src/main/tablo/tabloOku');
+    const tablo = require('../src/main/tablo/kesintiTablosu');
+    const KOD = ['KESİNTİNİN KODU (1)', 'KOD NO (1)', 'KESİNTİ KODU', 'KOD NO'];
+
+    const klasor = fs.mkdtempSync(path.join(os.tmpdir(), 'gercek-bicim-'));
+    const anaYol = path.join(klasor, 'form.xlsx');
+    const detayYol = path.join(klasor, 'formdetay.xlsx');
+
+    const yaz = async (yol, ad, satirlar) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet(ad);
+      for (const r of satirlar) ws.addRow(r);
+      await wb.xlsx.writeFile(yol);
+    };
+
+    await yaz(anaYol, 'AYSKesintilerForm1', [
+      ['Kurum Başlığı'],
+      ['Form No', '', 'FORM-01'],
+      [],
+      // grup satırı: adlar tekrar ediyor
+      ['KOD NO (1)', 'KADEME (2)', 'YER (3)', 'YER (3)',
+        'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)',
+        'ETKİLENEN KULLANICI SAYISI (9)', 'ETKİLENEN KULLANICI SAYISI (9)',
+        'TOPLAM ETKİLENME SÜRESİ (10)', 'TOPLAM ETKİLENME SÜRESİ (10)'],
+      // asıl başlık satırı: adlar farklı
+      ['KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)',
+        'KESİNTİ SÜRESİ (SAAT) (8)=(7)-(6)',
+        'OG (9A)', 'AG (9B)', 'OG(10A)=(9A)X(8)', 'AG(10B)=(9B)X(8)'],
+      [7001, 1, 'BURSA', 'KESTEL', 2, 600, 400, 1200, 800],
+      [7002, 1, 'BURSA', 'GÜRSU', 3, 100, 50, 300, 150],
+    ]);
+
+    await yaz(detayYol, 'Detay', [
+      ['KOD NO (1)', 'KADEME (2)', 'İL (3A)', 'İLÇE (3B)', 'KAYNAK TÜRÜ',
+        'KESİNTİ NEDENİNE İLİŞKİN AÇIKLAMA (4)', 'TOPLAM ABONE', 'TABLET AÇIKLAMA'],
+      [7001, 1, 'BURSA', 'KESTEL', 'KÖK', 'OG HAT BAKIM', 1000, 'not'],
+      [7002, 1, 'BURSA', 'GÜRSU', 'KÖK', 'OG HAT BAKIM', 150, 'not2'],
+    ]);
+
+    const okunan = await dosyaOku(anaYol, KOD);
+    kontrol('iki katlı başlıkta alttaki asıl satır seçiliyor',
+      okunan.baslikSatiri === 5
+      && okunan.basliklar.some((b) => b.ad === 'OG (9A)')
+      && !okunan.basliklar.some((b) => b.ad === 'ETKİLENEN KULLANICI SAYISI (9)'),
+      `başlık satırı ${okunan.baslikSatiri}`);
+
+    const sonuc = await tablo.olustur({
+      anaDosya: anaYol, detayDosya: detayYol,
+      hedefKlasor: klasor, tarihMetni: '26.08.2026',
+    });
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.readFile(sonuc.dosya);
+    const ws2 = wb2.getWorksheet('ARIZA DETAY');
+    const bas2 = [];
+    ws2.getRow(1).eachCell({ includeEmpty: true }, (c, i) => { bas2[i] = c.value; });
+    const aboneSut = bas2.indexOf('Toplam Abone');
+    const deger = (r) => ws2.getRow(r).getCell(aboneSut).value;
+
+    kontrol('abone toplamına (10A)=(9A)X(8) çarpım sütunları girmiyor',
+      aboneSut > 0 && deger(2) === 1000 && deger(3) === 150,
+      `7001 -> ${deger(2)} (beklenen 1000), 7002 -> ${deger(3)} (beklenen 150)`);
+
+    fs.rmSync(klasor, { recursive: true, force: true });
+  }
+
   console.log('\nBİNA TİPİ OSOS tablosu');
   {
     const ExcelJS = require('exceljs');
