@@ -4,11 +4,22 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { BrowserWindow, session, net } = require('electron');
+const http = require('node:http');
+const https = require('node:https');
+const zlib = require('node:zlib');
+const { BrowserWindow, session } = require('electron');
 
 const { YARDIM, indirmeyiIzle } = require('./portal');
 
-const BOLME = 'persist:portal';
+// OSOS servisi portalin disinda, ayri bir sunucuda duruyor. Indirme portal
+// oturumundan (cerezler, proxy, pencere) tamamen bagimsiz olsun diye duz
+// http/https ile yapiliyor; dusme ihtimali olan pencere yolu ancak adres
+// dosya yerine sayfa dondurdugunde devreye giriyor ve o da kendi bolmesinde.
+const BOLME = 'persist:ososServis';
+const YONLENDIRME_SINIRI = 5;
+// Ic ag adreslerinde sertifika cogu zaman IP'ye uymuyor; disari cikan bir
+// baglanti olmadigi icin yalniz bu araliklarda dogrulama gevsetiliyor.
+const IC_AG = /^(10\.|127\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|localhost$)/i;
 const VARSAYILAN_SAYFA_MS = 180000;
 const INDIRME_SURESI = 180000;
 const DUGMESIZ_BEKLEME = 3000;
@@ -108,6 +119,18 @@ function dosyaYaniti(basliklar) {
   return !SAYFA_TURU.test(tur.split(';')[0].trim());
 }
 
+function icAgMi(hedefUrl) {
+  try { return IC_AG.test(new URL(hedefUrl).hostname); } catch { return false; }
+}
+
+function cozucu(kodlama) {
+  const k = String(kodlama || '').toLowerCase();
+  if (k === 'gzip' || k === 'x-gzip') return zlib.createGunzip();
+  if (k === 'deflate') return zlib.createInflate();
+  if (k === 'br') return zlib.createBrotliDecompress();
+  return null;
+}
+
 function tekDeger(v) {
   return Array.isArray(v) ? v[0] : v;
 }
@@ -118,89 +141,163 @@ function basliklariDuzle(ham) {
   return cikti;
 }
 
-function dogrudanIndir(hedefUrl, klasor, oturum, log, ilkYanitMs = ILK_YANIT_SURESI) {
+function iptalHatasi() {
+  const e = new Error('OSOS servisinden indirme iptal edildi.');
+  e.iptal = true;
+  return e;
+}
+
+function dogrudanIndir(hedefUrl, klasor, log, ilkYanitMs = ILK_YANIT_SURESI,
+  iptal = () => false, kalanYonlendirme = YONLENDIRME_SINIRI) {
   return new Promise((coz, red) => {
+    if (iptal()) return red(iptalHatasi());
+    let adres;
+    try {
+      adres = new URL(hedefUrl);
+    } catch {
+      return red(new Error(`OSOS servisi adresi anlaşılamadı: ${hedefUrl}`));
+    }
+    if (adres.protocol !== 'http:' && adres.protocol !== 'https:') {
+      return red(new Error('OSOS servisi adresi http ya da https olmalı.'));
+    }
+
+    const kitaplik = adres.protocol === 'https:' ? https : http;
     let istek;
     try {
-      istek = net.request({ url: hedefUrl, session: oturum, useSessionCookies: true });
+      istek = kitaplik.request(adres, {
+        method: 'GET',
+        headers: { Accept: '*/*', 'Accept-Encoding': 'gzip, deflate', 'User-Agent': 'report-desk' },
+        ...(adres.protocol === 'https:' && icAgMi(hedefUrl) ? { rejectUnauthorized: false } : {}),
+      });
     } catch (e) {
-      return coz(null);
+      return red(new Error(`OSOS servisine istek açılamadı: ${e.message}`));
     }
+
     let sayac = null;
+    let nobetci = null;
+    let bitti = false;
+    let akis = null;
+    let yazici = null;
+    let hedef = null;
     const kur = (ms, mesaj) => {
       if (sayac) clearTimeout(sayac);
       sayac = setTimeout(() => {
-        try { istek.abort(); } catch { }
-        red(new Error(mesaj));
+        try { istek.destroy(); } catch { }
+        dur(red, new Error(mesaj));
       }, ms);
     };
+    const dur = (fn, deger) => {
+      if (bitti) return;
+      bitti = true;
+      if (sayac) clearTimeout(sayac);
+      if (nobetci) clearInterval(nobetci);
+      if (akis) { try { akis.destroy(); } catch { } }
+      if (yazici) { try { yazici.destroy(); } catch { } }
+      if (fn === red && hedef) { try { fs.unlinkSync(hedef); } catch { } }
+      fn(deger);
+    };
     kur(ilkYanitMs, `OSOS servisi ${Math.round(ilkYanitMs / 1000)} saniyede yanıt vermedi.`);
-    const bitir = (fn, deger) => { if (sayac) clearTimeout(sayac); fn(deger); };
+    // Portal isi yarida kalirsa (ornegin giris reddedilirse) burada bekleyen
+    // indirmenin dakikalarca surmesinin anlami yok; nobetci onu da kesiyor.
+    nobetci = setInterval(() => {
+      if (!iptal()) return;
+      try { istek.destroy(); } catch { }
+      dur(red, iptalHatasi());
+    }, 1000);
+    if (nobetci.unref) nobetci.unref();
 
-    istek.on('error', (e) => bitir(red,
+    istek.on('error', (e) => dur(red,
       new Error(`OSOS servisine ulaşılamadı: ${e.message}`)));
 
     istek.on('response', (yanit) => {
       kur(AKIS_BOSLUK_SURESI, 'OSOS servisinden gelen dosya yarıda kesildi (akış durdu).');
       const basliklar = basliklariDuzle(yanit.headers);
-      if (yanit.statusCode >= 400) {
-        yanit.on('data', () => { });
-        yanit.on('end', () => { });
-        return bitir(red, new Error(
-          `OSOS servisi ${yanit.statusCode} yanıtı verdi (${hedefUrl}).`));
+      const durum = yanit.statusCode || 0;
+
+      if (durum >= 300 && durum < 400 && basliklar.location) {
+        yanit.resume();
+        if (!kalanYonlendirme) {
+          return dur(red, new Error('OSOS servisi çok fazla yönlendirme yaptı.'));
+        }
+        const sonraki = new URL(basliklar.location, adres).toString();
+        if (sayac) clearTimeout(sayac);
+        if (nobetci) clearInterval(nobetci);
+        bitti = true;
+        return dogrudanIndir(sonraki, klasor, log, ilkYanitMs, iptal, kalanYonlendirme - 1)
+          .then(coz, red);
+      }
+      if (durum >= 400) {
+        yanit.resume();
+        return dur(red, new Error(
+          `OSOS servisi ${durum} yanıtı verdi (${hedefUrl}).`));
       }
       if (!dosyaYaniti(basliklar)) {
-        yanit.on('data', () => { });
-        yanit.on('end', () => bitir(coz, null));
+        yanit.resume();
+        yanit.on('end', () => dur(coz, null));
         return null;
       }
-      const parcalar = [];
+
+      const ad = dosyaAdiCoz(basliklar, hedefUrl);
+      hedef = benzersizYol(klasor, ad);
+      yazici = fs.createWriteStream(hedef);
+      const ac = cozucu(basliklar['content-encoding']);
+      akis = ac ? yanit.pipe(ac) : yanit;
       let boyut = 0;
-      yanit.on('data', (p) => {
+
+      const kesil = (e) => dur(red, e);
+      yanit.on('error', () => kesil(new Error('OSOS servisinden gelen dosya yarıda kesildi.')));
+      if (ac) ac.on('error', (e) => kesil(new Error(`OSOS dosyası açılamadı: ${e.message}`)));
+      yazici.on('error', (e) => kesil(new Error(`OSOS dosyası yazılamadı: ${e.message}`)));
+
+      akis.on('data', (p) => {
         kur(AKIS_BOSLUK_SURESI, 'OSOS servisinden gelen dosya yarıda kesildi (akış durdu).');
         boyut += p.length;
         if (boyut > EN_BUYUK_DOSYA) {
-          try { istek.abort(); } catch { }
-          return bitir(red, new Error('OSOS servisinden gelen dosya beklenenden büyük.'));
+          try { istek.destroy(); } catch { }
+          try { yazici.destroy(); } catch { }
+          kesil(new Error('OSOS servisinden gelen dosya beklenenden büyük.'));
         }
-        parcalar.push(p);
-        return null;
       });
-      yanit.on('end', () => {
-        if (!boyut) return bitir(coz, null);
-        const ad = dosyaAdiCoz(basliklar, hedefUrl);
-        const hedef = benzersizYol(klasor, ad);
-        fs.writeFileSync(hedef, Buffer.concat(parcalar));
-        log(`OSOS servisi: adres doğrudan dosya verdi (${ad}).`);
-        return bitir(coz, { dosya: hedef, ad: path.basename(hedef), boyut });
+      akis.pipe(yazici);
+      yazici.on('close', () => {
+        if (bitti) return;
+        if (!boyut) {
+          try { fs.unlinkSync(hedef); } catch { }
+          hedef = null;
+          return dur(coz, null);
+        }
+        const yol = hedef;
+        hedef = null;
+        log(`OSOS servisi: adres doğrudan dosya verdi (${path.basename(yol)}).`);
+        return dur(coz, { dosya: yol, ad: path.basename(yol), boyut });
       });
       return null;
     });
     istek.end();
+    return null;
   });
 }
 
 async function indir({
   url, klasor, dugme = '', aralik = null,
   sayfaMs = VARSAYILAN_SAYFA_MS, gorunur = false, kapat = true, log = () => { },
-  denemeArasiMs = DENEME_ARASI_MS,
+  denemeArasiMs = DENEME_ARASI_MS, iptal = () => false,
 }) {
   if (!url) throw new Error('OSOS servisi adresi tanımlı değil.');
   fs.mkdirSync(klasor, { recursive: true });
   const hedefUrl = adresiCoz(url, aralik);
-  const oturum = session.fromPartition(BOLME);
 
   let dogrudan = null;
   let sonHata = null;
   for (let deneme = 1; deneme <= DENEME_SAYISI; deneme++) {
     try {
-      dogrudan = await dogrudanIndir(hedefUrl, klasor, oturum, log,
-        Math.max(ILK_YANIT_SURESI, sayfaMs));
+      dogrudan = await dogrudanIndir(hedefUrl, klasor, log,
+        Math.max(ILK_YANIT_SURESI, sayfaMs), iptal);
       sonHata = null;
       break;
     } catch (e) {
       sonHata = e;
-      if (deneme >= DENEME_SAYISI) break;
+      if (e.iptal || deneme >= DENEME_SAYISI) break;
       log(`OSOS servisi ${deneme}. denemede başarısız (${e.message}); `
         + `${Math.round(denemeArasiMs / 1000)} sn sonra yeniden denenecek.`);
       await uyu(denemeArasiMs);
@@ -208,7 +305,9 @@ async function indir({
   }
   if (sonHata) throw sonHata;
   if (dogrudan) return dogrudan;
+  if (iptal()) throw iptalHatasi();
   log('OSOS servisi: adres sayfa döndürdü, indirme düğmesi aranacak.');
+  const oturum = session.fromPartition(BOLME);
 
   const pencere = new BrowserWindow({
     width: 1100,

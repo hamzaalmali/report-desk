@@ -573,7 +573,7 @@ function hesabiHazirla(numara) {
   return { numara: kayit.numara, ad: kayit.ad, kullanici: kayit.kullanici, sifre };
 }
 
-async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme, raporlar }) {
+async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme, raporlar, aralik }) {
   const ayarlar = portalAyarlari();
   const eksik = raporlar && raporlar.length
     ? (ayarlar.girisUrl ? [] : ['giriş adresi'])
@@ -586,6 +586,7 @@ async function portaliCalistir({ numara, onayKodu, dosyaHazir, ilerleme, raporla
       hesap,
       ayarlar,
       raporlar,
+      aralik,
       kokKlasor: PORTAL_KLASORU(),
       onayKodu,
       dosyaHazir,
@@ -730,6 +731,21 @@ async function tabloyuHazirla({ numara, onayKodu, ilerleme }) {
   return { sonuc, tablo };
 }
 
+function ososuTasi(kaynak, hedefKlasor) {
+  let hedef = path.join(hedefKlasor, path.basename(kaynak));
+  const uzanti = path.extname(hedef);
+  const govde = hedef.slice(0, hedef.length - uzanti.length);
+  let n = 2;
+  while (fs.existsSync(hedef)) hedef = `${govde}-${n++}${uzanti}`;
+  try {
+    fs.renameSync(kaynak, hedef);
+  } catch {
+    fs.copyFileSync(kaynak, hedef);
+    try { fs.unlinkSync(kaynak); } catch { }
+  }
+  return hedef;
+}
+
 async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
   const ayarlar = portalAyarlari();
   const eksik = portalAyar.dogrulaBina(ayarlar);
@@ -738,28 +754,59 @@ async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
       + 'Ayarlar → Rapor portalı kartına üç rapor adını ve OSOS servisi adresini yazın.');
   }
 
-  const sonuc = await portaliCalistir({
-    numara,
-    onayKodu,
-    ilerleme,
-    raporlar: [ayarlar.binaRapor1, ayarlar.binaRapor2, ayarlar.binaRapor3],
-  });
-
-  const [ihbar, formDetay, baglanti] = sonuc.dosyalar || [];
-  if (!ihbar || !ihbar.dosya) throw new Error('AYS İhbar Takip raporu indirilemedi.');
-  if (!formDetay || !formDetay.dosya) throw new Error('AYS Kesintiler Form Detay raporu indirilemedi.');
-  if (!baglanti || !baglanti.dosya) throw new Error('AYS Osos Bağlanma Oran raporu indirilemedi.');
-
-  const osos = await servisIndir.indir({
+  // OSOS servisi portaldan ayri bir sunucuda ve dosyayi istek aninda uretiyor.
+  // Uc raporun (icinde ~15 dakikalik Kesintiler Form Detay var) bitmesini
+  // beklemenin sebebi yok: indirme portal calisirken paralel yuruyor, dosya
+  // gecici klasore inip is sonunda portalin kayit klasorune tasiniyor.
+  const ososAralik = portal.tarihAraligi(ayarlar.gunGeri);
+  const ososKlasor = fs.mkdtempSync(path.join(app.getPath('userData'), 'osos-'));
+  let portalDustu = false;
+  kayit('OSOS servisi dosyası portal raporlarıyla paralel indiriliyor.');
+  const ososSozu = servisIndir.indir({
     url: ayarlar.ososUrl,
     dugme: ayarlar.ososDugme,
-    klasor: sonuc.klasor,
-    aralik: sonuc.aralik,
+    klasor: ososKlasor,
+    aralik: { bas: ososAralik.bas.metin, son: ososAralik.son.metin },
     sayfaMs: (ayarlar.sayfaSn || 180) * 1000,
     gorunur: ayarlar.gorunur,
     kapat: true,
     log: kayit,
+    iptal: () => portalDustu,
   });
+  // Portal once patlarsa bu soz sahipsiz kalmasin.
+  ososSozu.catch(() => { });
+
+  let sonuc = null;
+  try {
+    sonuc = await portaliCalistir({
+      numara,
+      onayKodu,
+      ilerleme,
+      aralik: ososAralik,
+      raporlar: [ayarlar.binaRapor1, ayarlar.binaRapor2, ayarlar.binaRapor3],
+    });
+  } catch (e) {
+    portalDustu = true;
+    try { await ososSozu; } catch { }
+    fs.rmSync(ososKlasor, { recursive: true, force: true });
+    throw e;
+  }
+
+  const [ihbar, formDetay, baglanti] = sonuc.dosyalar || [];
+  let osos = null;
+  try {
+    if (!ihbar || !ihbar.dosya) throw new Error('AYS İhbar Takip raporu indirilemedi.');
+    if (!formDetay || !formDetay.dosya) throw new Error('AYS Kesintiler Form Detay raporu indirilemedi.');
+    if (!baglanti || !baglanti.dosya) throw new Error('AYS Osos Bağlanma Oran raporu indirilemedi.');
+    const inen = await ososSozu;
+    const tasinan = ososuTasi(inen.dosya, sonuc.klasor);
+    osos = { ...inen, dosya: tasinan, ad: path.basename(tasinan) };
+    kayit(`OSOS servisi dosyası hazır: ${osos.ad} (${osos.boyut} bayt).`);
+  } finally {
+    portalDustu = true;
+    try { await ososSozu; } catch { }
+    fs.rmSync(ososKlasor, { recursive: true, force: true });
+  }
 
   const tablo = await binaTipiOsos.olustur({
     ihbarDosya: ihbar.dosya,

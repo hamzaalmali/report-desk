@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const zlib = require('node:zlib');
 const { app } = require('electron');
 
 const portal = require('../src/main/portal/portal');
@@ -278,6 +279,33 @@ function sunucuKur(kayit) {
       return yolla('titrek-inen-icerik', 'application/octet-stream', {
         'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
       });
+    }
+    if (url.pathname === '/osos-yonlendir') {
+      yanit.writeHead(302, { Location: '/osos-yonlendirilen' });
+      return yanit.end();
+    }
+    if (url.pathname === '/osos-yonlendirilen') {
+      kayit.ososCerez = istek.headers.cookie || '';
+      return yolla('yonlendirilen-icerik', 'application/octet-stream', {
+        'Content-Disposition': 'attachment; filename="yonlendirilen.xlsx"',
+      });
+    }
+    if (url.pathname === '/osos-gzip') {
+      yanit.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Encoding': 'gzip',
+        'Content-Disposition': 'attachment; filename="sikistirilmis.xlsx"',
+      });
+      return yanit.end(zlib.gzipSync('sikistirilmis-icerik'));
+    }
+    if (url.pathname === '/osos-yavas') {
+      kayit.ososYavas = (kayit.ososYavas || 0) + 1;
+      yanit.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="yavas.xlsx"',
+      });
+      yanit.write('bas');
+      return null;
     }
     if (url.pathname === '/osos-adsiz') {
       return yolla('adsiz-inen-icerik',
@@ -580,6 +608,59 @@ app.whenReady().then(async () => {
       && fs.readFileSync(titrek.dosya, 'utf8') === 'titrek-inen-icerik'
       && kayit.ososTitrek === 3,
       `${kayit.ososTitrek} deneme — ${titrek && (titrek.ad || titrek.message)}`);
+
+    let yonlendirme = null;
+    try {
+      yonlendirme = await servisIndir.indir({
+        url: `${kok}/osos-yonlendir`, klasor: path.join(servisKlasor, 'yonlendirme'),
+        gorunur, kapat: true, log: () => { },
+      });
+    } catch (e) {
+      yonlendirme = e;
+    }
+    kontrol('yönlendirilen adres takip edilip dosya iniyor',
+      yonlendirme && yonlendirme.dosya && fs.existsSync(yonlendirme.dosya)
+      && fs.readFileSync(yonlendirme.dosya, 'utf8') === 'yonlendirilen-icerik'
+      && yonlendirme.ad === 'yonlendirilen.xlsx',
+      yonlendirme && (yonlendirme.ad || yonlendirme.message));
+    kontrol('OSOS isteği portal oturumunun çerezini taşımıyor',
+      kayit.ososCerez === '', JSON.stringify(kayit.ososCerez));
+
+    let sikisik = null;
+    try {
+      sikisik = await servisIndir.indir({
+        url: `${kok}/osos-gzip`, klasor: path.join(servisKlasor, 'gzip'),
+        gorunur, kapat: true, log: () => { },
+      });
+    } catch (e) {
+      sikisik = e;
+    }
+    kontrol('gzip ile gelen dosya açılarak yazılıyor',
+      sikisik && sikisik.dosya && fs.existsSync(sikisik.dosya)
+      && fs.readFileSync(sikisik.dosya, 'utf8') === 'sikistirilmis-icerik',
+      sikisik && (sikisik.ad || sikisik.message));
+
+    const iptalKlasor = path.join(servisKlasor, 'iptal');
+    let iptalEdilen = null;
+    let iptalIstendi = false;
+    try {
+      const sozu = servisIndir.indir({
+        url: `${kok}/osos-yavas`, klasor: iptalKlasor,
+        gorunur, kapat: true, denemeArasiMs: 50, log: () => { },
+        iptal: () => iptalIstendi,
+      });
+      sozu.catch(() => { });
+      await new Promise((c) => setTimeout(c, 300));
+      iptalIstendi = true;
+      iptalEdilen = await sozu;
+    } catch (e) {
+      iptalEdilen = e;
+    }
+    kontrol('iptal edilince indirme durup yarım dosyayı bırakmıyor',
+      iptalEdilen instanceof Error && iptalEdilen.iptal === true
+      && kayit.ososYavas === 1
+      && (!fs.existsSync(iptalKlasor) || fs.readdirSync(iptalKlasor).length === 0),
+      iptalEdilen && iptalEdilen.message);
 
     let adsiz = null;
     try {

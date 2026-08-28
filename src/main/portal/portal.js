@@ -735,7 +735,10 @@ async function calistir(istek) {
     }
   };
 
-  const aralik = tarihAraligi(ayarlar.gunGeri);
+  // Cagiran taraf araligi onceden hesaplamis olabilir (BINA TIPI OSOS servis
+  // dosyasini paralel indirirken yapiyor); gun donumunde ikisinin ayrisip
+  // farkli gunun raporlarini istemesin diye ayni aralik kullaniliyor.
+  const aralik = istek.aralik || tarihAraligi(ayarlar.gunGeri);
 
   const ONAY_GORUNUR = `(function () { var o = window.__rd.bul(${JSON.stringify(ALAN.onayKodu)});`
     + ' return !!(o && window.__rd.gorunur(o)); })()';
