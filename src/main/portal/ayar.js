@@ -6,14 +6,14 @@ const ALANLAR = [
   { anahtar: 'portalGirisUrl', ad: 'girisUrl', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalAnaUrl', ad: 'anaUrl', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalRaporAdi', ad: 'raporAdi', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalTabloRapor1', ad: 'tabloRapor1', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalTabloRapor2', ad: 'tabloRapor2', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalBinaRapor1', ad: 'binaRapor1', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalBinaRapor2', ad: 'binaRapor2', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalBinaRapor3', ad: 'binaRapor3', tur: 'metin', varsayilan: '' },
+  { anahtar: 'portalTabloRapor1', ad: 'tabloRapor1', tur: 'metin', varsayilan: ' AYS Kesintiler Form' },
+  { anahtar: 'portalTabloRapor2', ad: 'tabloRapor2', tur: 'metin', varsayilan: ' AYS Kesinti Detay Listesi' },
+  { anahtar: 'portalBinaRapor1', ad: 'binaRapor1', tur: 'metin', varsayilan: 'AYS Ihbar Takip Raporu' },
+  { anahtar: 'portalBinaRapor2', ad: 'binaRapor2', tur: 'metin', varsayilan: 'AYS Kesintiler Form Detay' },
+  { anahtar: 'portalBinaRapor3', ad: 'binaRapor3', tur: 'metin', varsayilan: 'AYS Osos Bağlanma Oran Raporu TSUIS' },
   { anahtar: 'portalOsosUrl', ad: 'ososUrl', tur: 'metin', varsayilan: '' },
   { anahtar: 'portalOsosDugme', ad: 'ososDugme', tur: 'metin', varsayilan: '' },
-  { anahtar: 'portalSaat', ad: 'saat', tur: 'metin', varsayilan: '01:00' },
+  { anahtar: 'portalSaat', ad: 'saat', tur: 'metin', varsayilan: '00:00' },
   {
     anahtar: 'portalMenuXpath',
     ad: 'menuXpath',
@@ -28,7 +28,7 @@ const ALANLAR = [
   },
   { anahtar: 'portalGunGeri', ad: 'gunGeri', tur: 'sayi', varsayilan: 1 },
   { anahtar: 'portalSayfaSn', ad: 'sayfaSn', tur: 'sayi', varsayilan: 180, enAz: 15 },
-  { anahtar: 'portalYenilemeSn', ad: 'yenilemeSn', tur: 'sayi', varsayilan: 120, enAz: 5 },
+  { anahtar: 'portalYenilemeSn', ad: 'yenilemeSn', tur: 'sayi', varsayilan: 10, enAz: 5 },
   { anahtar: 'portalBeklemeDk', ad: 'beklemeDk', tur: 'sayi', varsayilan: 60, enAz: 1 },
   { anahtar: 'portalOnaySn', ad: 'onaySn', tur: 'sayi', varsayilan: 180 },
   { anahtar: 'portalKayitDepo', ad: 'kayitDepo', tur: 'metin', varsayilan: '' },
@@ -37,6 +37,10 @@ const ALANLAR = [
 ];
 
 const ESKIYEN = {
+  // Kuyruk raporlarin cogunu ~10 saniyede hazirliyor; 120 sn eski varsayilandi
+  // ve her raporda bosuna iki dakika bekletiyordu.
+  yenilemeSn: ['120'],
+  saat: ['01:00'],
   menuXpath: [
     '//*[@id="leftsidenav"]/li[7]',
     '/html/body/form/div[3]/div/div/div[1]/ul/li[7]',

@@ -272,6 +272,13 @@ function sunucuKur(kayit) {
         'Content-Disposition': 'attachment; filename="bina_tipi.xlsx"',
       });
     }
+    if (url.pathname === '/osos-titrek') {
+      kayit.ososTitrek = (kayit.ososTitrek || 0) + 1;
+      if (kayit.ososTitrek < 3) { istek.socket.destroy(); return null; }
+      return yolla('titrek-inen-icerik', 'application/octet-stream', {
+        'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
+      });
+    }
     if (url.pathname === '/osos-adsiz') {
       return yolla('adsiz-inen-icerik',
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -557,6 +564,22 @@ app.whenReady().then(async () => {
       && dogrudan.ad === 'bina_tipi.xlsx' && kayit.ososDogrudan === 1
       && BW.getAllWindows().length === 0,
       dogrudan && (dogrudan.ad || dogrudan.message));
+
+    let titrek = null;
+    try {
+      titrek = await servisIndir.indir({
+        url: `${kok}/osos-titrek`, klasor: path.join(servisKlasor, 'titrek'),
+        gorunur, kapat: true, denemeArasiMs: 50,
+        log: (m) => console.log('    · ' + m),
+      });
+    } catch (e) {
+      titrek = e;
+    }
+    kontrol('servis düşüp toparlayınca indirme yeniden deneniyor',
+      titrek && titrek.dosya && fs.existsSync(titrek.dosya)
+      && fs.readFileSync(titrek.dosya, 'utf8') === 'titrek-inen-icerik'
+      && kayit.ososTitrek === 3,
+      `${kayit.ososTitrek} deneme — ${titrek && (titrek.ad || titrek.message)}`);
 
     let adsiz = null;
     try {

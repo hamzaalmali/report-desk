@@ -54,7 +54,7 @@ async function genisTabloBul() {
   return null;
 }
 
-function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
+function sahteSayfa(yardimKodu, tanimlar = [], menu = null, izgara = null) {
   const sayfa = { tiklananlar: [] };
 
   const oge = (t) => {
@@ -65,6 +65,10 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
       className: t.sinif || '',
       disabled: !!t.kapali,
       children: [],
+      ebeveyn: null,
+      hucreler: t.hucreler || null,
+      get cells() { return e.hucreler; },
+      get innerText() { return e.textContent; },
       get textContent() {
         return [kendiYazi, ...e.children.map((c) => c.textContent)].join(' ').trim();
       },
@@ -77,7 +81,14 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
       focus() { },
       dispatchEvent() { return true; },
       click() { sayfa.tiklananlar.push(e.id || e.textContent); },
-      closest: (secici) => (secici === 'tr' ? { innerText: t.satir || '' } : null),
+      closest: (secici) => {
+        let u = e.ebeveyn;
+        while (u) {
+          if (String(u.tagName).toLowerCase() === String(secici).toLowerCase()) return u;
+          u = u.ebeveyn;
+        }
+        return secici === 'tr' && t.satir != null ? { innerText: t.satir } : null;
+      },
       querySelector: (secici) => ara(e, secici)[0] || null,
       querySelectorAll: (secici) => ara(e, secici),
     };
@@ -87,9 +98,13 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
   const eslesir = (e, secici) => {
     const etiket = (secici.match(/^[a-z]+/) || [])[0];
     if (etiket && e.tagName !== etiket.toUpperCase()) return false;
-    return (secici.match(/id\*="([^"]+)"/g) || [])
+    const icerir = (secici.match(/id\*="([^"]+)"/g) || [])
       .map((p) => p.slice(5, -1))
       .every((p) => String(e.id).includes(p));
+    if (!icerir) return false;
+    return (secici.match(/id\$="([^"]+)"/g) || [])
+      .map((p) => p.slice(5, -1))
+      .every((p) => String(e.id).endsWith(p));
   };
 
   const ara = (kok, secici) => {
@@ -107,6 +122,18 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
 
   const ogeler = tanimlar.map(oge);
   const kokler = [...ogeler];
+
+  if (izgara) {
+    const tablo = oge({ id: 'ctl00_ContentPlaceHolder1_grdRaporKuyruk', etiket: 'TABLE' });
+    for (const s of izgara) {
+      const hucreler = [s.kayit, s.rapor, s.istek, s.bitis || '', s.par || '',
+        s.format || 'EXCEL', s.durum].map((m) => ({ innerText: String(m == null ? '' : m) }));
+      const tr = oge({ etiket: 'TR', hucreler });
+      if (s.dugmeId) tr.children.push(oge({ id: s.dugmeId, kapali: !!s.kapali }));
+      tablo.children.push(tr);
+    }
+    kokler.push(tablo);
+  }
 
   if (menu) {
     const liste = oge({ id: menu.id || 'leftsidenav', etiket: 'UL' });
@@ -128,10 +155,14 @@ function sahteSayfa(yardimKodu, tanimlar = [], menu = null) {
 
   const tumu = () => {
     const hepsi = [];
-    const gez = (e) => { hepsi.push(e); e.children.forEach(gez); };
+    const gez = (e) => {
+      hepsi.push(e);
+      e.children.forEach((c) => { c.ebeveyn = e; gez(c); });
+    };
     kokler.forEach(gez);
     return hepsi;
   };
+  tumu();
 
   const belge = {
     getElementById: (id) => tumu().find((e) => e.id === id) || null,
@@ -548,7 +579,16 @@ async function main() {
       ['hava durumu', 'Hava Durumu', 'HAVA DURUMU', 'hava durumu?', 'hava']
         .every((m) => !!komut.komutBul(m)));
     kontrol('benzeyen kelimeler komut sayılmıyor',
-      ['merhaba', 'havalimanı bilgisi', 'havale', ''].every((m) => komut.komutBul(m) === null));
+      ['merhaba', 'havalimanı bilgisi', 'havale', '', 'binbaşı', 'binek araç']
+        .every((m) => komut.komutBul(m) === null));
+    kontrol('BİNA TİPİ OSOS komutu yazım farklarına dayanıklı',
+      ['bina gönder', 'bina gonder', 'BINA GONDER', 'Bina Gönder', 'bina tipi osos',
+        'bina tipi osos gonder', 'osos gonder', 'bina']
+        .every((m) => (komut.komutBul(m) || {}).kod === 'bina'),
+      ['bina gonder', 'osos gonder'].map((m) => `${m}=${(komut.komutBul(m) || {}).kod}`).join(' '));
+    kontrol('diğer komutlar da Türkçe harfsiz yazılabiliyor',
+      (komut.komutBul('tablo gonder') || {}).kod === 'tablo'
+      && (komut.komutBul('rapor indir') || {}).kod === 'rapor');
 
     const isle = komut.olustur({ izinliler: () => '905388179495', log: () => { } });
     kontrol('izinsiz numaraya yanıt yok',
@@ -1455,8 +1495,10 @@ async function main() {
 
     const v = portalAyar.oku(db);
     kontrol('portal ayarları varsayılanla geliyor',
-      v.saat === '01:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === ''
-      && v.sayfaSn === 180,
+      v.saat === '00:00' && v.gunGeri === 1 && v.gorunur === true && v.girisUrl === ''
+      && v.sayfaSn === 180 && v.binaRapor1 === 'AYS Ihbar Takip Raporu'
+      && v.binaRapor3 === 'AYS Osos Bağlanma Oran Raporu TSUIS'
+      && v.tabloRapor1 === ' AYS Kesintiler Form',
       JSON.stringify(v));
     kontrol('sayfa beklemesi alt sınırın altına inmiyor',
       portalAyar.yaz(db, { sayfaSn: 3 }).sayfaSn === 15
@@ -1464,7 +1506,7 @@ async function main() {
       && portalAyar.yaz(db, { sayfaSn: '' }).sayfaSn === 180);
     kontrol('eksik ayar bildiriliyor', portalAyar.dogrula(v).length === 2);
     kontrol('tablo ayarı eksikleri ayrıca bildiriliyor',
-      portalAyar.dogrulaTablo(v).length === 3
+      portalAyar.dogrulaTablo(v).length === 1
       && portalAyar.dogrulaTablo({ girisUrl: 'x', tabloRapor1: 'A', tabloRapor2: 'B' }).length === 0,
       portalAyar.dogrulaTablo(v).join(', '));
 
@@ -1590,7 +1632,7 @@ async function main() {
       portal.dosyaAdiTemiz('Rapor / Giriş: 2026?') === 'Rapor-Giriş-2026');
 
     kontrol('kuyruk bekleme ayarları varsayılanla geliyor',
-      portalAyar.oku(db).yenilemeSn === 120 && portalAyar.oku(db).beklemeDk === 60,
+      portalAyar.oku(db).yenilemeSn === 10 && portalAyar.oku(db).beklemeDk === 60,
       `${portalAyar.oku(db).yenilemeSn} sn / ${portalAyar.oku(db).beklemeDk} dk`);
     const bekAyar = portalAyar.yaz(db, { yenilemeSn: 90, beklemeDk: 30 });
     kontrol('kuyruk bekleme ayarları kaydediliyor',
@@ -1601,8 +1643,12 @@ async function main() {
       kisaAyar.yenilemeSn === 5 && kisaAyar.beklemeDk === 1,
       JSON.stringify({ y: kisaAyar.yenilemeSn, b: kisaAyar.beklemeDk }));
     portalAyar.yaz(db, { yenilemeSn: '', beklemeDk: '' });
-    kontrol('ayar boşaltılınca 2 dakikaya dönüyor',
-      portalAyar.oku(db).yenilemeSn === 120 && portalAyar.oku(db).beklemeDk === 60);
+    kontrol('ayar boşaltılınca varsayılana dönüyor',
+      portalAyar.oku(db).yenilemeSn === 10 && portalAyar.oku(db).beklemeDk === 60);
+    portalAyar.yaz(db, { yenilemeSn: 120 });
+    kontrol('eskiyen 120 sn yenileme yeni varsayılana dönüyor',
+      portalAyar.oku(db).yenilemeSn === 10, String(portalAyar.oku(db).yenilemeSn));
+    portalAyar.yaz(db, { yenilemeSn: '' });
   }
 
   console.log('\nPortal kuyruğu (sayfa içi kod)');
@@ -1612,29 +1658,79 @@ async function main() {
     const HAZIR = portal.ALAN.indir;
     const BEKLEYEN = HAZIR.replace('ctl04', 'ctl06');
 
-    let sayfa = sahteSayfa(portal.YARDIM, [
-      { id: HAZIR, kapali: true, satir: 'Günlük Rapor Hazırlanıyor' },
-    ]);
-    let k = sayfa.rd.kuyruk(HAZIR, S);
-    kontrol('rapor hazırlanırken indirme düğmesi hazır sayılmıyor',
-      k.hazir === false && k.sayi === 1 && k.satir.includes('Hazırlanıyor'), JSON.stringify(k));
+    const IHBAR = 'AYS Ihbar Takip Raporu';
+    const DETAY = 'AYS Kesintiler Form Detay';
 
-    sayfa = sahteSayfa(portal.YARDIM, [
-      { id: HAZIR, satir: 'Günlük Rapor Tamamlandı' },
+    let sayfa = sahteSayfa(portal.YARDIM, [], null, [
+      { kayit: '1', rapor: IHBAR, istek: '28.08.2026 18:04:08',
+        durum: 'Hazırlanıyor' },
     ]);
-    k = sayfa.rd.kuyruk(HAZIR, S);
+    let k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, '1');
+    kontrol('rapor hazırlanırken indirme düğmesi hazır sayılmıyor',
+      k.hazir === false && k.sayi === 1 && k.durum === 'Hazırlanıyor', JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], null, [
+      { kayit: '1', rapor: IHBAR, istek: '28.08.2026 18:04:08', durum: 'Başarılı',
+        dugmeId: HAZIR },
+    ]);
+    k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, '1');
     kontrol('rapor bitince hazır görünüyor',
       k.hazir === true && k.id === HAZIR && k.kendi === true, JSON.stringify(k));
 
-    sayfa = sahteSayfa(portal.YARDIM, [{ id: BEKLEYEN, satir: 'Başka satır' }]);
-    k = sayfa.rd.kuyruk(HAZIR, S);
-    kontrol('beklenen satır yoksa kuyruktaki ilk düğmeye düşülüyor',
-      k.hazir === true && k.id === BEKLEYEN && k.kendi === false, JSON.stringify(k));
+    // Kuyrukta baska bir raporun bitmis satiri varken kendi satirimiz daha
+    // hazirlaniyorsa, eskiden ilk satir alinip YANLIS rapor indiriliyordu.
+    sayfa = sahteSayfa(portal.YARDIM, [], null, [
+      { kayit: '1', rapor: IHBAR, istek: '28.08.2026 18:04:08', durum: 'Başarılı',
+        dugmeId: HAZIR },
+      { kayit: '2', rapor: DETAY, istek: '28.08.2026 18:06:19', durum: 'Hazırlanıyor' },
+    ]);
+    k = sayfa.rd.kuyruk(HAZIR, S, DETAY, '2');
+    kontrol('başka raporun bitmiş satırı kendi raporumuz sanılmıyor',
+      k.hazir === false && k.nasil === 'kayit' && k.kayit === '2', JSON.stringify(k));
 
-    sayfa = sahteSayfa(portal.YARDIM, []);
-    k = sayfa.rd.kuyruk(HAZIR, S);
+    k = sayfa.rd.kuyruk(HAZIR, S, DETAY);
+    kontrol('kayıt numarası yoksa satır rapor adıyla bulunuyor',
+      k.hazir === false && k.nasil === 'ad', JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], null, [
+      { kayit: '1', rapor: IHBAR, istek: '28.08.2026 09:00:00', durum: 'Başarılı',
+        dugmeId: HAZIR },
+      { kayit: '2', rapor: IHBAR, istek: '28.08.2026 18:04:08', durum: 'Başarılı',
+        dugmeId: BEKLEYEN },
+    ]);
+    k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, '2');
+    kontrol('aynı rapordan eski satır varken kendi kaydımız seçiliyor',
+      k.id === BEKLEYEN && k.kayit === '2', JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [{ id: BEKLEYEN, satir: 'Başka satır' }]);
+    k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, null);
+    kontrol('ızgara okunamazsa bilinen düğmeye düşülüyor',
+      k.nasil === 'yedek', JSON.stringify(k));
+
+    sayfa = sahteSayfa(portal.YARDIM, [], null, []);
+    k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, null);
     kontrol('kuyruk boşken hazır denmiyor',
       k.hazir === false && k.sayi === 0 && k.id === null, JSON.stringify(k));
+
+    // Izgaranin baslik satiri da <tr>; satir sayilirsa kuyruk bir fazla gorunuyordu.
+    sayfa = sahteSayfa(portal.YARDIM, [], null, [
+      { kayit: 'Id', rapor: 'Rapor Adı', istek: 'İstek Zamanı', durum: 'Durum' },
+      { kayit: '1', rapor: IHBAR, istek: '28.08.2026 18:04:08', durum: 'Başarılı',
+        dugmeId: HAZIR },
+    ]);
+    k = sayfa.rd.kuyruk(HAZIR, S, IHBAR, '1');
+    kontrol('ızgara başlık satırı kuyruk satırı sayılmıyor',
+      k.sayi === 1 && k.kayit === '1', JSON.stringify(k));
+
+    kontrol('portal listesindeki "(TÜMÜ)" değeri deneniyor',
+      portal.TUMU_DEGERLERI.includes('(TÜMÜ)'), portal.TUMU_DEGERLERI.join(' | '));
+
+    kontrol('açık oturum hatası ne yapılacağını söylüyor',
+      /oturumu kapatın/.test(portal.girisRedMesaji(
+        'Belirtilen kullanıcı hesabı şu anda aktif bir oturuma sahip.'
+      ))
+      && !/oturumu kapatın/.test(portal.girisRedMesaji('Şifre hatalı')),
+      portal.girisRedMesaji('Belirtilen kullanıcı hesabı şu anda aktif bir oturuma sahip.'));
 
     sayfa = sahteSayfa(portal.YARDIM, [{ id: portal.ALAN.kaydet }]);
     kontrol('düğmeye tıklanınca tıklandığı bildiriliyor',

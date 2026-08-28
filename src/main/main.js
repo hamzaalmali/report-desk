@@ -845,7 +845,10 @@ async function isiHazirlaDenemeli(is, secenekler, haber = () => { }) {
     return await is.hazirla(secenekler);
   } catch (e) {
     const mesaj = e.message || '';
-    if (/durduruldu/i.test(mesaj) || /ayarları eksik/i.test(mesaj)) throw e;
+    // Girisi portal reddettiyse yeniden denemek bos: acik oturumu kapatmasi ya da
+    // sifreyi duzeltmesi gereken kullanicidir, ikinci deneme ayni duvara carpar.
+    if (/durduruldu/i.test(mesaj) || /ayarları eksik/i.test(mesaj)
+      || /girişi reddetti/i.test(mesaj)) throw e;
     kayit(`${is.ad} ilk denemede başarısız: ${mesaj} — baştan yeniden deneniyor.`);
     db.logYaz(null, 'portal', `${is.ad} ilk denemede başarısız (${mesaj}), yeniden deneniyor`);
     haber(`Tarayıcı hata verdi: ${mesaj}\nBaştan bir kez daha deneniyor…`);

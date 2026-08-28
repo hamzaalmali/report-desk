@@ -12,7 +12,15 @@ const BOLME = 'persist:portal';
 const VARSAYILAN_SAYFA_MS = 180000;
 const INDIRME_SURESI = 180000;
 const DUGMESIZ_BEKLEME = 3000;
-const DOGRUDAN_SURESI = 120000;
+// Servis dosyayi istek aninda uretiyor: ilk bayt gecikiyor, arada veri akmiyor.
+// Olculen sure ~70 sn ama yuke gore uzuyor; ilk yanit icin genis, akis
+// basladiktan sonra parcalar arasi bosluk icin ayri sinir kullanilir.
+const ILK_YANIT_SURESI = 900000;
+const AKIS_BOSLUK_SURESI = 180000;
+// Servis bazen anlik olarak dusuyor; butun isi (icinde 15 dakikalik rapor da var)
+// bastan almaktansa yalniz bu adimi birkac kez denemek dogru.
+const DENEME_SAYISI = 3;
+const DENEME_ARASI_MS = 15000;
 const EN_BUYUK_DOSYA = 200 * 1024 * 1024;
 const VARSAYILAN_DOSYA = 'osos_rapor.xlsx';
 const SAYFA_TURU = /^(text\/html|application\/xhtml)/i;
@@ -110,7 +118,7 @@ function basliklariDuzle(ham) {
   return cikti;
 }
 
-function dogrudanIndir(hedefUrl, klasor, oturum, log) {
+function dogrudanIndir(hedefUrl, klasor, oturum, log, ilkYanitMs = ILK_YANIT_SURESI) {
   return new Promise((coz, red) => {
     let istek;
     try {
@@ -118,16 +126,22 @@ function dogrudanIndir(hedefUrl, klasor, oturum, log) {
     } catch (e) {
       return coz(null);
     }
-    const sayac = setTimeout(() => {
-      try { istek.abort(); } catch { }
-      red(new Error('OSOS servisi yanıt vermedi (süre doldu).'));
-    }, DOGRUDAN_SURESI);
-    const bitir = (fn, deger) => { clearTimeout(sayac); fn(deger); };
+    let sayac = null;
+    const kur = (ms, mesaj) => {
+      if (sayac) clearTimeout(sayac);
+      sayac = setTimeout(() => {
+        try { istek.abort(); } catch { }
+        red(new Error(mesaj));
+      }, ms);
+    };
+    kur(ilkYanitMs, `OSOS servisi ${Math.round(ilkYanitMs / 1000)} saniyede yanıt vermedi.`);
+    const bitir = (fn, deger) => { if (sayac) clearTimeout(sayac); fn(deger); };
 
     istek.on('error', (e) => bitir(red,
       new Error(`OSOS servisine ulaşılamadı: ${e.message}`)));
 
     istek.on('response', (yanit) => {
+      kur(AKIS_BOSLUK_SURESI, 'OSOS servisinden gelen dosya yarıda kesildi (akış durdu).');
       const basliklar = basliklariDuzle(yanit.headers);
       if (yanit.statusCode >= 400) {
         yanit.on('data', () => { });
@@ -143,6 +157,7 @@ function dogrudanIndir(hedefUrl, klasor, oturum, log) {
       const parcalar = [];
       let boyut = 0;
       yanit.on('data', (p) => {
+        kur(AKIS_BOSLUK_SURESI, 'OSOS servisinden gelen dosya yarıda kesildi (akış durdu).');
         boyut += p.length;
         if (boyut > EN_BUYUK_DOSYA) {
           try { istek.abort(); } catch { }
@@ -168,13 +183,30 @@ function dogrudanIndir(hedefUrl, klasor, oturum, log) {
 async function indir({
   url, klasor, dugme = '', aralik = null,
   sayfaMs = VARSAYILAN_SAYFA_MS, gorunur = false, kapat = true, log = () => { },
+  denemeArasiMs = DENEME_ARASI_MS,
 }) {
   if (!url) throw new Error('OSOS servisi adresi tanımlı değil.');
   fs.mkdirSync(klasor, { recursive: true });
   const hedefUrl = adresiCoz(url, aralik);
   const oturum = session.fromPartition(BOLME);
 
-  const dogrudan = await dogrudanIndir(hedefUrl, klasor, oturum, log);
+  let dogrudan = null;
+  let sonHata = null;
+  for (let deneme = 1; deneme <= DENEME_SAYISI; deneme++) {
+    try {
+      dogrudan = await dogrudanIndir(hedefUrl, klasor, oturum, log,
+        Math.max(ILK_YANIT_SURESI, sayfaMs));
+      sonHata = null;
+      break;
+    } catch (e) {
+      sonHata = e;
+      if (deneme >= DENEME_SAYISI) break;
+      log(`OSOS servisi ${deneme}. denemede başarısız (${e.message}); `
+        + `${Math.round(denemeArasiMs / 1000)} sn sonra yeniden denenecek.`);
+      await uyu(denemeArasiMs);
+    }
+  }
+  if (sonHata) throw sonHata;
   if (dogrudan) return dogrudan;
   log('OSOS servisi: adres sayfa döndürdü, indirme düğmesi aranacak.');
 
@@ -245,4 +277,5 @@ async function indir({
 
 module.exports = {
   indir, adresiCoz, dosyaAdiCoz, dosyaYaniti, DUGME_DESENI, VARSAYILAN_DOSYA,
+  ILK_YANIT_SURESI, AKIS_BOSLUK_SURESI, DENEME_SAYISI,
 };

@@ -20,7 +20,7 @@ const IHBAR_SAYFA = 'BİNA TİPİ';
 const BAGLANTI_SAYFA = 'OSOS BAĞLANTI';
 
 const IHBAR_KOD_DESEN = ['İHBAR NO', 'TALEP NO'];
-const OSOS_KOD_DESEN = ['TALEP NO', 'ADI'];
+const OSOS_KOD_DESEN = ['LOKASYON_ID', 'LOKASYON ID', 'TALEP NO', 'ADI'];
 const FORM_KOD_DESEN = ['KESİNTİNİN KODU (1)', 'KOD NO (1)', 'KESİNTİ KODU', 'KOD NO'];
 const BAGLANTI_KOD_DESEN = ['KESINTI NO', 'KESİNTİ NO'];
 
@@ -41,7 +41,12 @@ const IHBAR_SON_SUTUNLAR = [
   { ad: 'Kesinti No', desen: ['KESİNTİ NO'], harf: 5, genislik: 13, sayiya: true },
 ];
 
-const OSOS_TALEP = { desen: ['TALEP NO', 'TALEP NUMARASI', 'TALEP'], harf: 3 };
+// Servisten inen dosyada talep numarasi sutunu LOKASYON_ID adiyla geliyor;
+// harf sirasi yalnizca son care.
+const OSOS_TALEP = {
+  desen: ['LOKASYON_ID', 'LOKASYON ID', 'TALEP NO', 'TALEP NUMARASI', 'TALEP'],
+  harf: 3,
+};
 const OSOS_SUTUNLARI = [
   { ad: 'TRAFO ADI', desen: ['ADI'], harf: 4, genislik: 40 },
   { ad: 'TİPİ', desen: ['TIPI', 'TİPİ'], harf: 7, genislik: 16 },

@@ -26,6 +26,14 @@ function anahtar(metin) {
   return trUpper(metin).replace(/[\s.\-_?!]/g, '');
 }
 
+// "bina gonder" gibi Türkçe harfsiz yazımlar da tanınsın diye komut
+// karşılaştırması sadeleştirilmiş biçim üzerinden yapılır.
+function sade(metin) {
+  return anahtar(metin)
+    .replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ş/g, 'S')
+    .replace(/İ/g, 'I').replace(/Ö/g, 'O').replace(/Ç/g, 'C');
+}
+
 const KOMUTLAR = [
   {
     kod: 'hava',
@@ -66,6 +74,12 @@ function komutBul(metin) {
     if ((c.tam || []).includes(k)) return c;
     if ((c.onEk || []).some((d) => k.startsWith(d))) return c;
   }
+  const y = sade(metin);
+  if (!y) return null;
+  for (const c of KOMUTLAR) {
+    if ((c.tam || []).some((d) => sade(d) === y)) return c;
+    if ((c.onEk || []).some((d) => y.startsWith(sade(d)))) return c;
+  }
   return null;
 }
 
@@ -104,5 +118,6 @@ function olustur({ izinliler, log, servisler = {}, ekIzin = () => false }) {
 }
 
 module.exports = {
-  olustur, komutBul, numaralariCoz, numaraDuzelt, anahtar, KOMUTLAR, VARSAYILAN_NUMARALAR,
+  olustur, komutBul, numaralariCoz, numaraDuzelt, anahtar, sade,
+  KOMUTLAR, VARSAYILAN_NUMARALAR,
 };

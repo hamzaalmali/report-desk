@@ -32,11 +32,17 @@ const ALAN = {
 
 const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 
+// Portal ayni hesapla ikinci girisi reddediyor. Bu hatada yeniden denemenin
+// anlami yok: oturumu kapatmasi gereken kullanicidir.
+const AKTIF_OTURUM = /aktif bir oturuma sahip|mevcut oturumu kapat/i;
+const AKTIF_OTURUM_DESENI_JS =
+  '/[^.]*aktif bir oturuma sahip[^.]*\\.?[^.]*(?:kapat[^.]*\\.)?/i';
+
 const BOLME = 'persist:portal';
 const IL_KODU_DEGERI = 'Tümü';
 
 const TUMU_KUTULARI = [ALAN.ilKodu, ALAN.mudurlukKodu];
-const TUMU_DEGERLERI = [IL_KODU_DEGERI, 'TÜMÜ', 'Tumu', 'TUMU'];
+const TUMU_DEGERLERI = ['(TÜMÜ)', '(Tümü)', IL_KODU_DEGERI, 'TÜMÜ', 'Tumu', 'TUMU'];
 const BAS_TARIH_KUTULARI = [ALAN.basTarih, ALAN.basTarihAlt];
 // Saat kutusunun adı rapora göre değişiyor: bazı raporlarda tek cmbSAAT,
 // bazılarında cmbILKSAAT + cmbSONSAAT ikilisi. Var olanların hepsi doldurulur.
@@ -207,15 +213,82 @@ const YARDIM = `
     if (!s) return '';
     return (s.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 160);
   };
-  rd.kuyruk = function (id, secici) {
-    var hepsi = [].slice.call(document.querySelectorAll(secici));
-    var e = rd.bul(id) || hepsi[0] || null;
+  rd.kuyrukZaman = function (m) {
+    var p = String(m || '').match(
+      /(\\d{2})\\.(\\d{2})\\.(\\d{4})\\s+(\\d{2}):(\\d{2}):(\\d{2})/);
+    if (!p) return 0;
+    return new Date(+p[3], +p[2] - 1, +p[1], +p[4], +p[5], +p[6]).getTime();
+  };
+  // Kuyruk satirlari indirme dugmesinden degil izgaradan okunur: "Sirada" ve
+  // "Hazirlaniyor" satirlarinda dugme hic yoktur, kendi kaydimizi ancak
+  // satirin kayit numarasiyla izleyebiliriz.
+  rd.kuyrukSatirlari = function () {
+    var izgara = document.querySelector('[id*="grdRaporKuyruk"]');
+    if (!izgara) return [];
+    return [].slice.call(izgara.querySelectorAll('tr')).map(function (tr) {
+      var h = [].slice.call(tr.cells || []).map(function (c) {
+        return (c.innerText || '').replace(/\\s+/g, ' ').trim();
+      });
+      if (h.length < 7) return null;
+      var d = tr.querySelector('input[id*="btnRaporIndir"][id$="_input"]');
+      // Izgaranin baslik satiri da tr; kayit numarasi sayi degilse ve satirda
+      // indirme dugmesi yoksa veri satiri sayilmaz.
+      if (!d && !/^\\d+$/.test(h[0] || '')) return null;
+      return {
+        oge: d,
+        id: d ? d.id : null,
+        kayit: h[0] || '',
+        rapor: h[1] || '',
+        istek: rd.kuyrukZaman(h[2]),
+        durum: h[6] || '',
+        etkin: !!(d && rd.etkin(d)),
+      };
+    }).filter(function (x) { return x && (x.kayit || x.rapor); });
+  };
+  // Kaydet dugmesine basildiktan hemen sonra kendi satirimizin kayit
+  // numarasini alir; sonraki yenilemelerde yalniz o satira bakilir.
+  rd.kuyrukKendiKayit = function (raporAdi) {
+    var hepsi = rd.kuyrukSatirlari();
+    if (raporAdi) {
+      var k = rd.kars(raporAdi);
+      var ad = hepsi.filter(function (s) { return rd.kars(s.rapor) === k; });
+      if (ad.length) hepsi = ad;
+    }
+    if (!hepsi.length) return null;
+    var s2 = hepsi.slice().sort(function (a, b) { return b.istek - a.istek; });
+    return { kayit: s2[0].kayit, rapor: s2[0].rapor, durum: s2[0].durum };
+  };
+  rd.kuyruk = function (id, secici, raporAdi, kayitNo) {
+    var hepsi = rd.kuyrukSatirlari();
+    var adaylar = hepsi;
+    var nasil = 'ilk';
+    if (kayitNo) {
+      var kn = hepsi.filter(function (s) { return s.kayit === String(kayitNo); });
+      if (kn.length) { adaylar = kn; nasil = 'kayit'; }
+    }
+    if (nasil === 'ilk' && raporAdi) {
+      var k = rd.kars(raporAdi);
+      var ad = hepsi.filter(function (s) { return rd.kars(s.rapor) === k; });
+      if (ad.length) { adaylar = ad; nasil = 'ad'; }
+    }
+    var s2 = adaylar.slice().sort(function (a, b) { return b.istek - a.istek; });
+    var e = s2.filter(function (x) { return x.etkin; })[0] || s2[0] || null;
+    if (!e) {
+      var y = rd.bul(id);
+      return {
+        hazir: !!(y && rd.etkin(y)), id: y ? y.id : null, kendi: !!y,
+        nasil: 'yedek', sayi: hepsi.length, satir: rd.satirMetni(y),
+      };
+    }
     return {
-      hazir: !!(e && rd.etkin(e)),
-      id: e ? e.id : null,
-      kendi: !!rd.bul(id),
+      hazir: !!e.etkin,
+      id: e.id,
+      kendi: nasil !== 'ilk',
+      nasil: nasil,
+      durum: e.durum,
+      kayit: e.kayit,
       sayi: hepsi.length,
-      satir: rd.satirMetni(e),
+      satir: rd.satirMetni(e.oge) || (e.kayit + ' ' + e.rapor + ' ' + e.durum),
     };
   };
   rd.mesgul = function () {
@@ -320,6 +393,25 @@ function uyu(ms) {
 
 function ikiHane(s) {
   return String(s).padStart(2, '0');
+}
+
+function girisRedMesaji(mesaj) {
+  if (AKTIF_OTURUM.test(mesaj)) {
+    return `Portal girişi reddetti: “${mesaj}” — bu kullanıcının portalda açık `
+      + 'bir oturumu var. Portala girip oturumu kapatın (ya da başka bir hesapla '
+      + 'deneyin), sonra komutu yeniden gönderin.';
+  }
+  return `Portal girişi reddetti: “${mesaj}”`;
+}
+
+// Tarayicidaki rd.kars ile ayni kural: noktali/noktasiz I ayrimini kaldirir.
+function kars(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFC')
+    .replace(/[\u0130I\u0131]/g, 'i')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function tarihParcala(g) {
@@ -654,8 +746,12 @@ async function calistir(istek) {
   const JETON_DOLU = `(function () { var j = window.__rd.bul(${JSON.stringify(ALAN.jeton)});`
     + ' return !j || !!(j.value && String(j.value).length > 20); })()';
   const GIRIS_HATASI = `(function () { var h = window.__rd.bul(${JSON.stringify(ALAN.girisHata)});`
-    + ' return h && window.__rd.gorunur(h)'
-    + ' ? (h.innerText || h.textContent || "").replace(/\\s+/g, " ").trim() : ""; })()';
+    + ' if (h && window.__rd.gorunur(h)) {'
+    + ' var m = (h.innerText || h.textContent || "").replace(/\\s+/g, " ").trim();'
+    + ' if (m) return m; }'
+    + ` var g = (document.body ? document.body.innerText : "").replace(/\\s+/g, " ");`
+    + ` var a = g.match(${AKTIF_OTURUM_DESENI_JS});`
+    + ' return a ? a[0].trim() : ""; })()';
 
   const jetonuBekle = async (sure = JETON_SURESI) => {
     const bitis = Date.now() + sure;
@@ -695,10 +791,11 @@ async function calistir(istek) {
       }
       if (!girisVar) { aktifCerceve = null; return 'gecti'; }
       const mesaj = await girisHatasi();
-      if (mesaj) throw new Error(`Portal girişi reddetti: “${mesaj}”`);
+      if (mesaj) throw new Error(girisRedMesaji(mesaj));
       await uyu(300);
     }
     const son = await girisHatasi();
+    if (son && AKTIF_OTURUM.test(son)) throw new Error(girisRedMesaji(son));
     throw new Error('Giriş sonrası ekran gelmedi — hâlâ giriş sayfasındayız. '
       + (son ? `Portalın mesajı: “${son}”` : 'Kullanıcı adı veya şifre yanlış olabilir, '
         + 'ya da reCAPTCHA jetonu gelmemiş olabilir.')
@@ -833,9 +930,15 @@ async function calistir(istek) {
       const deger = await dene(`window.__rd.comboDeger(${JSON.stringify(ALAN.rapor)})`);
       if (!deger) throw new Error('Rapor seçilemedi.');
       const secenekler = await dene(`window.__rd.comboListe(${JSON.stringify(ALAN.rapor)}).slice(0, 60)`);
-      if (String(deger).trim() !== String(raporAdi).trim()) {
+      const esit = String(deger).trim() === String(raporAdi).trim()
+        || kars(deger) === kars(raporAdi);
+      if (!esit) {
         throw new Error(`Rapor adı kutuya yerleşmedi (kutuda "${deger}" yazıyor). `
           + `Listedekiler: ${(secenekler || []).join(' | ') || 'okunamadı'}`);
+      }
+      if (String(deger).trim() !== String(raporAdi).trim()) {
+        log(`Portal: rapor adı listede "${deger}" olarak geçiyor `
+          + `(ayarlarda "${raporAdi}" yazıyor); listedeki ad kullanıldı.`);
       }
       return { yontem, deger };
     });
@@ -911,6 +1014,7 @@ async function calistir(istek) {
       };
     });
 
+    let kendiKayit = null;
     await adim('rapor-kaydet' + ek, 'Rapor kuyruğa gönderiliyor' + etiket, async () => {
       const c = await cerceveSec(`!!window.__rd.bul(${JSON.stringify(ALAN.kaydet)})`,
         'Raporu kaydet düğmesi bulunamadı — sayfa ya da düğme adı değişmiş olabilir', sayfaMs);
@@ -929,11 +1033,21 @@ async function calistir(istek) {
         + ' || !!document.querySelector(\'[id*="grdRaporKuyruk"]\'))',
         'rapor kuyruğu ekranı açılmadı — rapor kuyruğa alınmamış olabilir', sayfaMs
       );
-      return { yontem, url: pencere.webContents.getURL() };
+      kendiKayit = await dene(
+        `window.__rd.kuyrukKendiKayit(${JSON.stringify(raporAdi)})`
+      );
+      if (kendiKayit && kendiKayit.kayit) {
+        log(`Portal: kuyruk kaydı ${kendiKayit.kayit} (${kendiKayit.durum || '?'}) `
+          + 'bu isteğe ait sayıldı; kuyrukta yalnız o satır izlenecek.');
+      } else {
+        log('Portal: kuyruk kaydı numarası okunamadı, satır rapor adıyla aranacak.');
+      }
+      return { yontem, url: pencere.webContents.getURL(), kayit: kendiKayit };
     });
 
     const KUYRUK = `window.__rd.kuyruk(${JSON.stringify(ALAN.indir)},`
-      + ` ${JSON.stringify(KUYRUK_SECICI)})`;
+      + ` ${JSON.stringify(KUYRUK_SECICI)}, ${JSON.stringify(raporAdi)},`
+      + ` ${JSON.stringify((kendiKayit && kendiKayit.kayit) || null)})`;
 
     const kuyruk = await adim('kuyruk' + ek, 'Raporun hazırlanması bekleniyor' + etiket, async (bilgi) => {
       const araMs = Math.max(EN_KISA_YENILEME, Number(ayarlar.yenilemeSn) || 120) * 1000;
@@ -1069,5 +1183,5 @@ async function calistir(istek) {
 
 module.exports = {
   calistir, durumAl, iptal, tarihAraligi, dosyaAdiTemiz, gizle, indirmeyiIzle,
-  ALAN, KUYRUK_SECICI, YARDIM,
+  ALAN, KUYRUK_SECICI, YARDIM, AKTIF_OTURUM, girisRedMesaji, TUMU_DEGERLERI,
 };
