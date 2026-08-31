@@ -19,6 +19,7 @@ let devirIsleyici = () => { };
 const sonKomut = new Map();
 let yenidenDeneme = 0;
 let zamanlayici = null;
+let nobet = null;
 
 const durum = {
   asama: 'kapali',      // kapali | baglaniyor | qr | bagli | hata
@@ -28,6 +29,44 @@ const durum = {
   hata: null,
   sonDegisim: null,
 };
+
+// Soket, connection.update olayi hic gelmeden de olebiliyor: uygulama "bagli"
+// gorunmeye devam eder, mesaj almaz, kimse fark etmez. Baileys'in websocket
+// sarmalayicisina bakip gercek durumu ogreniyoruz.
+const NOBET_ARALIGI = 30000;
+
+function wsAcikMi(w) {
+  if (!w) return false;
+  if (typeof w.isOpen === 'boolean') return w.isOpen || w.isConnecting === true;
+  const rs = w.readyState != null ? w.readyState : (w.socket && w.socket.readyState);
+  // Surum bu alanlarin hicbirini vermiyorsa bosuna yeniden baglanma.
+  return rs == null ? true : rs === 0 || rs === 1;
+}
+
+function soketCanliMi() {
+  return !!sock && wsAcikMi(sock.ws);
+}
+
+function nobetDurdur() {
+  clearInterval(nobet);
+  nobet = null;
+}
+
+function nobetBaslat() {
+  nobetDurdur();
+  nobet = setInterval(() => {
+    if (kapatiliyor || durum.asama !== 'bagli' || soketCanliMi()) return;
+    gunluk('WhatsApp soketi haber vermeden kapanmış (uygulama "bağlı" görünüyordu), '
+      + 'yeniden bağlanılıyor.');
+    nobetDurdur();
+    try { if (sock) sock.end(undefined); } catch { }
+    sock = null;
+    bildir({ asama: 'baglaniyor', qr: null, numara: null, ad: null,
+      hata: 'Bağlantı sessizce koptu, yeniden bağlanılıyor.' });
+    baslat(true).catch(() => { });
+  }, NOBET_ARALIGI);
+  if (nobet.unref) nobet.unref();
+}
 
 function bildir(yeni = {}) {
   Object.assign(durum, yeni, { sonDegisim: new Date().toISOString() });
@@ -158,6 +197,7 @@ async function soketAc() {
 
     if (connection === 'open') {
       yenidenDeneme = 0;
+      nobetBaslat();
       const kendi = sock.user || {};
       bildir({
         asama: 'bagli',
@@ -172,6 +212,7 @@ async function soketAc() {
       const kod = lastDisconnect && lastDisconnect.error
         && lastDisconnect.error.output && lastDisconnect.error.output.statusCode;
       sock = null;
+      nobetDurdur();
 
       if (kapatiliyor) { bildir({ asama: 'kapali', qr: null, numara: null, ad: null }); return; }
 
@@ -211,6 +252,7 @@ async function soketAc() {
 
       yenidenDeneme++;
       if (yenidenDeneme > 5) {
+        gunluk(`WhatsApp bağlantısı 5 denemede kurulamadı (son kod: ${kod || 'bilinmiyor'}).`);
         bildir({ asama: 'hata', qr: null,
           hata: `Bağlantı kurulamadı, 5 deneme başarısız (son kod: ${kod || 'bilinmiyor'}). `
             + 'Ağ ya da güvenlik duvarı WhatsApp bağlantısını engelliyor olabilir. '
@@ -218,6 +260,8 @@ async function soketAc() {
         return;
       }
       const bekle = Math.min(30000, 2000 * yenidenDeneme);
+      gunluk(`WhatsApp bağlantısı koptu (kod ${kod || 'bilinmiyor'}), `
+        + `${bekle / 1000} sn sonra ${yenidenDeneme}. deneme.`);
       bildir({ asama: 'baglaniyor', qr: null,
         hata: `Bağlantı koptu (${kod || 'bilinmiyor'}), ${bekle / 1000} sn sonra yeniden denenecek.` });
       zamanlayici = setTimeout(() => { baslat(true).catch(() => { }); }, bekle);
@@ -395,6 +439,7 @@ async function durdur() {
   kapatiliyor = true;
   yenidenDeneme = 0;
   clearTimeout(zamanlayici);
+  nobetDurdur();
   if (sock) {
     try { sock.end(undefined); } catch { }
     sock = null;
@@ -407,6 +452,7 @@ async function cikisYap() {
   kapatiliyor = true;
   yenidenDeneme = 0;
   clearTimeout(zamanlayici);
+  nobetDurdur();
   if (sock) {
     try { await sock.logout(); } catch { }
     try { sock.end(undefined); } catch { }
@@ -454,16 +500,37 @@ async function gruplariGetir() {
     .sort((a, b) => a.ad.localeCompare(b.ad, 'tr'));
 }
 
+// Soket olmus ama "bagli" gorunuyorsa sendMessage hic donmuyor; is orada
+// sessizce asili kaliyordu. Sure asimi bunu hataya cevirir, cagiran taraf da
+// kullaniciya haber verebilir.
+const GONDERIM_SURESI = 120000;
+
+async function sureSinirli(soz, ms, mesaj) {
+  let sayac = null;
+  try {
+    return await Promise.race([
+      soz,
+      new Promise((_c, red) => { sayac = setTimeout(() => red(new Error(mesaj)), ms); }),
+    ]);
+  } finally {
+    clearTimeout(sayac);
+  }
+}
+
 async function belgeGonder(jid, dosyaYolu, dosyaAdi, aciklama) {
   const s = bagliMi();
   const ad = dosyaAdi || path.basename(dosyaYolu);
   const veri = fs.readFileSync(dosyaYolu);
-  yanitiIsaretle(await s.sendMessage(jid, {
+  const basladi = Date.now();
+  yanitiIsaretle(await sureSinirli(s.sendMessage(jid, {
     document: veri,
     fileName: ad,
     mimetype: dosyaTuru(ad),
     caption: aciklama || '',
-  }));
+  }), GONDERIM_SURESI, `Dosya ${GONDERIM_SURESI / 1000} saniyede gönderilemedi `
+    + '(bağlantı kopmuş olabilir).'));
+  gunluk(`WhatsApp dosya gönderildi: ${ad} → ${jid} (${veri.length} bayt, `
+    + `${Date.now() - basladi} ms).`);
 }
 
 async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme) {
@@ -486,5 +553,5 @@ async function topluBelgeGonder(jidler, dosyaYolu, dosyaAdi, aciklama, ilerleme)
 module.exports = {
   kur, baslat, durdur, cikisYap, durumAl, oturumVarMi,
   gruplariGetir, belgeGonder, topluBelgeGonder, dosyaTuru,
-  gonderenNumara, mesajMetni, gonder, sor, soruDusur, uyar,
+  gonderenNumara, mesajMetni, gonder, sor, soruDusur, uyar, wsAcikMi, sureSinirli,
 };

@@ -859,6 +859,34 @@ async function main() {
     fs.rmSync(klasor, { recursive: true, force: true });
   }
 
+  console.log('\nWhatsApp soket canlılığı');
+  {
+    const wa = require('../src/main/whatsapp/wa');
+    // Soket connection.update yaymadan olebiliyor; nobet gercek ws durumuna bakar.
+    kontrol('açık soket canlı sayılıyor', wa.wsAcikMi({ isOpen: true }) === true);
+    kontrol('kapanmış soket ölü sayılıyor', wa.wsAcikMi({ isOpen: false }) === false);
+    kontrol('bağlanmakta olan soket ölü sayılmıyor',
+      wa.wsAcikMi({ isOpen: false, isConnecting: true }) === true);
+    kontrol('soket yoksa ölü sayılıyor', wa.wsAcikMi(null) === false);
+    kontrol('eski sürümde readyState okunuyor',
+      wa.wsAcikMi({ socket: { readyState: 1 } }) === true
+      && wa.wsAcikMi({ socket: { readyState: 3 } }) === false);
+    kontrol('durum bilinmiyorsa boşuna yeniden bağlanılmıyor', wa.wsAcikMi({}) === true);
+
+    // Olmus sokette sendMessage hic donmuyordu; is orada asili kaliyordu.
+    const bitmeyen = new Promise(() => { });
+    let sureHatasi = null;
+    try {
+      await wa.sureSinirli(bitmeyen, 30, 'gönderilemedi');
+    } catch (e) {
+      sureHatasi = e.message;
+    }
+    kontrol('yanıt vermeyen gönderim süre aşımıyla hataya dönüyor',
+      sureHatasi === 'gönderilemedi', String(sureHatasi));
+    kontrol('zamanında biten gönderim sonucunu döndürüyor',
+      await wa.sureSinirli(Promise.resolve('tamam'), 5000, 'olmaz') === 'tamam');
+  }
+
   console.log('\nBİNA TİPİ OSOS tablosu');
   {
     const ExcelJS = require('exceljs');
@@ -871,6 +899,29 @@ async function main() {
       && bina.gunMetni('2026-08-11T09:24:23.000Z') === '11.08.2026'
       && bina.gunMetni('') === '',
       [bina.gunMetni('11.08.2026 06:50:48'), bina.gunMetni('2026-08-11T09:24:23.000Z')].join(' | '));
+
+    // Ayarlarda rapor adlari 1. ve 2. kutuya ters girilmisti; dosyalar sirayla
+    // okundugu icin Ihbar raporu Form Detay sanilip tablo patliyordu.
+    {
+      const dosya = (rapor) => ({ rapor, dosya: `${rapor}.xlsx` });
+      const ihbar = dosya('AYS Ihbar Takip Raporu');
+      const form = dosya('AYS Kesintiler Form Detay');
+      const baglanti = dosya('AYS Osos Bağlanma Oran Raporu TSUIS');
+      const ters = bina.dosyalariAyir([form, ihbar, baglanti]);
+      const duz = bina.dosyalariAyir([ihbar, form, baglanti]);
+      kontrol('ters girilen bina rapor adları adlarına göre yerine oturuyor',
+        ters[0] === ihbar && ters[1] === form && ters[2] === baglanti
+        && duz[0] === ihbar && duz[1] === form && duz[2] === baglanti,
+        ters.map((d) => d.rapor).join(' | '));
+
+      const bilinmeyen = [dosya('Rapor A'), dosya('Rapor B'), dosya('Rapor C')];
+      kontrol('tanınmayan adlarda sıra bozulmadan bırakılıyor',
+        bina.dosyalariAyir(bilinmeyen).every((d, i) => d === bilinmeyen[i]));
+
+      kontrol('noktalı/noktasız I ayrımı bina raporlarında da kalkıyor',
+        bina.dosyalariAyir([baglanti, dosya('AYS İHBAR TAKİP RAPORU'), form])[0].rapor
+          === 'AYS İHBAR TAKİP RAPORU');
+    }
 
     kontrol('servis adresindeki tarih yer tutucuları doluyor',
       servisIndir.adresiCoz('http://sunucu/osos?g={tarih}&s={son}',

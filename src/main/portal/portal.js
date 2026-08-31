@@ -5,6 +5,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { BrowserWindow, session } = require('electron');
+const { kars } = require('../../shared/tr');
 
 const ALAN = {
   kullanici: 'txtKullaniciAdi',
@@ -35,6 +36,7 @@ const KUYRUK_SECICI = 'input[id*="grdRaporKuyruk"][id*="btnRaporIndir"]';
 // Portal ayni hesapla ikinci girisi reddediyor. Bu hatada yeniden denemenin
 // anlami yok: oturumu kapatmasi gereken kullanicidir.
 const AKTIF_OTURUM = /aktif bir oturuma sahip|mevcut oturumu kapat/i;
+const CIKIS_BEKLEME = 1500;
 const AKTIF_OTURUM_DESENI_JS =
   '/[^.]*aktif bir oturuma sahip[^.]*\\.?[^.]*(?:kapat[^.]*\\.)?/i';
 
@@ -404,16 +406,6 @@ function girisRedMesaji(mesaj) {
   return `Portal girişi reddetti: “${mesaj}”`;
 }
 
-// Tarayicidaki rd.kars ile ayni kural: noktali/noktasiz I ayrimini kaldirir.
-function kars(s) {
-  return String(s == null ? '' : s)
-    .normalize('NFC')
-    .replace(/[\u0130I\u0131]/g, 'i')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 function tarihParcala(g) {
   return {
     gun: g.getDate(),
@@ -623,6 +615,25 @@ async function calistir(istek) {
       await uyu(300);
     }
     throw new Error(`Beklenen aşamaya ulaşılamadı: ${aciklama}`);
+  };
+
+  // Portal ayni kullaniciyla ikinci girisi "aktif bir oturumunuz var" diye
+  // reddediyor. Pencereyi kapatmak sunucudaki oturumu bitirmiyor; baslik
+  // cercevesindeki "Güvenli Çıkış" bagina basmak gerekiyor. Is nasil biterse
+  // bitsin cagriliyor, bulamazsa sessizce geciyor.
+  const guvenliCikis = async () => {
+    if (pencereKapandi) return false;
+    try { if (pencere.isDestroyed()) return false; } catch { return false; }
+    for (const c of cerceveler()) {
+      try {
+        if (!await c.executeJavaScript("!!document.getElementById('lgStatus')", true)) continue;
+        await c.executeJavaScript("document.getElementById('lgStatus').click()", true);
+        await uyu(CIKIS_BEKLEME);
+        log('Portal: güvenli çıkış yapıldı, sunucudaki oturum bırakıldı.');
+        return true;
+      } catch { }
+    }
+    return false;
   };
 
   const cerceveSec = async (ifade, aciklama, sure = OGE_SURESI) => {
@@ -1177,6 +1188,7 @@ async function calistir(istek) {
     throw e;
   } finally {
     indirme.birak();
+    try { await guvenliCikis(); } catch { }
     calisan = null;
     if (ayarlar.kapat || hataOldu) {
       try { if (!pencere.isDestroyed()) pencere.destroy(); } catch { }

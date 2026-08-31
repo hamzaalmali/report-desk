@@ -73,4 +73,16 @@ function enYakin(deger, adaylar) {
   return enIyi;
 }
 
-module.exports = { trUpper, key, isBlank, enYakin, altDiziMi, uzaklik };
+// Portaldaki rapor/menu adlarini karsilastirmak icin: noktali/noktasiz I
+// ayrimini kaldirir, bosluklari tekler. Tarayiciya enjekte edilen rd.kars ile
+// ayni kural.
+function kars(s) {
+  return String(s == null ? '' : s)
+    .normalize('NFC')
+    .replace(/[\u0130I\u0131]/g, 'i')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+module.exports = { trUpper, key, kars, isBlank, enYakin, altDiziMi, uzaklik };

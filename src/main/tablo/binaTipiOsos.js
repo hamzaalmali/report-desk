@@ -4,7 +4,7 @@
 
 const path = require('node:path');
 const ExcelJS = require('exceljs');
-const { key } = require('../../shared/tr');
+const { key, kars } = require('../../shared/tr');
 const {
   sayi, duz, kodMetni, sutunBul, sutunSec, dosyaOku, sayfaYaz,
 } = require('./tabloOku');
@@ -287,6 +287,24 @@ async function baglantiSayfasi({ baglantiDosya, bitisTarihi, log }) {
   };
 }
 
+// Rapor adlari Ayarlar'da elle yaziliyor ve kutulara ters girilebiliyor; inen
+// dosyalari sirasina degil, rapor adindaki anahtar kelimeye gore yerlestir.
+// kars() noktali/noktasiz I ayrimini kaldirdigi icin "Ihbar" ile "İhbar" esit.
+function dosyalariAyir(dosyalar, log = () => { }) {
+  if (!Array.isArray(dosyalar) || dosyalar.length !== 3) return dosyalar;
+  const adi = (d) => kars(d && d.rapor);
+  const ihbar = dosyalar.find((d) => adi(d).includes('ihbar'));
+  const baglanti = dosyalar.find((d) => d !== ihbar && adi(d).includes('osos'));
+  const formDetay = dosyalar.find((d) => d !== ihbar && d !== baglanti);
+  if (!ihbar || !baglanti || !formDetay) return dosyalar;
+  const sira = [ihbar, formDetay, baglanti];
+  if (sira.some((d, i) => d !== dosyalar[i])) {
+    log('BİNA TİPİ OSOS: rapor adları kutulara sırasıyla girilmemiş, '
+      + `dosyalar adlarına göre yerleştirildi (${sira.map((d) => d.rapor).join(' | ')}).`);
+  }
+  return sira;
+}
+
 async function olustur({
   ihbarDosya, ososDosya, formDetayDosya, baglantiDosya,
   hedefKlasor, tarihMetni, bitisTarihi, log = () => { },
@@ -309,7 +327,7 @@ async function olustur({
 }
 
 module.exports = {
-  olustur, gunMetni, sayiyaCevir,
+  olustur, dosyalariAyir, gunMetni, sayiyaCevir,
   IHBAR_DETAY_SECILEN, KAPSAM_DISI, TAM_ORAN, KESINTI_VAR, KESINTI_YOK,
   IHBAR_SAYFA, BAGLANTI_SAYFA, BAGLANTI_SUTUNLARI, OSOS_SUTUNLARI,
 };

@@ -168,6 +168,31 @@ function artikKilidiTemizle(dosyaYolu) {
   return false;
 }
 
+// SQLite'in WASM derlemesi kilidi <veritabani>.lock klasoru olarak tutuyor.
+// Surec esitleme ortasinda olurse klasor kaliyor ve ortak dosya butun
+// makineler icin sonsuza kadar kilitli goruluyor. Kendi eşitlememiz en fazla
+// bir dakika surdugu icin bu yastan eski kilit artiktir; baska bir makine
+// o sirada esitliyorsa kilidi taze olur ve dokunulmaz.
+const ARTIK_KILIT_YASI = 3 * 60 * 1000;
+
+function bayatKilidiTemizle(dosyaYolu) {
+  const kilit = dosyaYolu + '.lock';
+  try {
+    const yas = Date.now() - fs.statSync(kilit).mtimeMs;
+    if (yas < ARTIK_KILIT_YASI) {
+      kayit(`Ortak dosyanın kilidi taze (${Math.round(yas / 1000)} sn); `
+        + 'başka bir bilgisayar eşitliyor olabilir, dokunulmadı.');
+      return false;
+    }
+    fs.rmSync(kilit, { recursive: true, force: true });
+    kayit(`Ortak dosyada ${Math.round(yas / 60000)} dakikadır duran artık kilit silindi: ${kilit}`);
+    return true;
+  } catch (e) {
+    if (e.code !== 'ENOENT') hataYaz('bayat kilit temizleme', e);
+    return false;
+  }
+}
+
 function tanila(dosyaYolu) {
   const klasor = path.dirname(dosyaYolu);
   const b = { yol: dosyaYolu, klasor, uzunluk: dosyaYolu.length, platform: process.platform };
@@ -792,7 +817,7 @@ async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
     throw e;
   }
 
-  const [ihbar, formDetay, baglanti] = sonuc.dosyalar || [];
+  const [ihbar, formDetay, baglanti] = binaTipiOsos.dosyalariAyir(sonuc.dosyalar || [], kayit);
   let osos = null;
   try {
     if (!ihbar || !ihbar.dosya) throw new Error('AYS İhbar Takip raporu indirilemedi.');
@@ -1124,7 +1149,13 @@ function esitlemeyiCalistir(elle = false) {
   const basladi = Date.now();
   let baglanti = null;
   try {
-    baglanti = db.baglantiAc(dosya);
+    try {
+      baglanti = db.baglantiAc(dosya);
+    } catch (e) {
+      if (!/database (is|table is) locked/i.test(e.message || '')) throw e;
+      if (!bayatKilidiTemizle(dosya)) throw e;
+      baglanti = db.baglantiAc(dosya);
+    }
     const sayac = senkron.esitle(db.raw, baglanti.db);
     const kayitNesnesi = {
       zaman: new Date().toISOString(),

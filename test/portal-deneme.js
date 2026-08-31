@@ -48,7 +48,10 @@ const MENU_XPATH = '//*[@id="leftsidenav"]/li[6]';
 
 const ANA = SAYFA('Ana Sayfa', `
   <form>
-    <div>üst şerit</div>
+    <div>üst şerit
+      <a id="lgStatus" title="Güvenli Çıkış" href="javascript:void(0)"
+        onclick="fetch('/cikis.aspx')"></a>
+    </div>
     <div>ikinci şerit</div>
     <div><div><div><div>
       <ul id="leftsidenav">
@@ -220,6 +223,11 @@ function sunucuKur(kayit) {
       yanit.writeHead(200, { 'Content-Type': tur, ...ek });
       yanit.end(govde);
     };
+
+    if (url.pathname === '/cikis.aspx') {
+      kayit.cikis = (kayit.cikis || 0) + 1;
+      return yolla('tamam', 'text/plain; charset=utf-8');
+    }
 
     if (url.pathname === '/Login.aspx' && istek.method === 'POST') {
       const f = await govdeOku(istek);
@@ -444,6 +452,10 @@ app.whenReady().then(async () => {
       && menuAdimi.sonuc.menu.metin === 'RAPORLAR'
       && menuAdimi.sonuc.alt.metin === 'Raporlar',
       menuAdimi && JSON.stringify({ m: menuAdimi.sonuc.menu, a: menuAdimi.sonuc.alt }));
+    // Pencereyi kapatmak sunucudaki oturumu bitirmiyordu; ikinci komut
+    // "aktif bir oturumunuz var" diye reddediliyordu.
+    kontrol('iş bitince portaldan güvenli çıkış yapıldı',
+      kayit.cikis >= 1, `çıkış sayısı: ${kayit.cikis || 0}`);
     kontrol('özet dosyası yazıldı', dosyalar.includes('ozet.json'));
 
     const girisHtml = fs.readFileSync(
