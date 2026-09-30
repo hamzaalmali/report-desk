@@ -30,7 +30,9 @@ const ILK_YANIT_SURESI = 900000;
 const AKIS_BOSLUK_SURESI = 180000;
 // Servis bazen anlik olarak dusuyor; butun isi (icinde 15 dakikalik rapor da var)
 // bastan almaktansa yalniz bu adimi birkac kez denemek dogru.
-const DENEME_SAYISI = 3;
+// Bekleme her denemede ikiye katlanir (15, 30, 60 sn): kisa kesintide hemen,
+// uzun kesintide sunucuyu bogmadan yeniden denenir.
+const DENEME_SAYISI = 4;
 const DENEME_ARASI_MS = 15000;
 const EN_BUYUK_DOSYA = 200 * 1024 * 1024;
 const VARSAYILAN_DOSYA = 'osos_rapor.xlsx';
@@ -139,6 +141,26 @@ function basliklariDuzle(ham) {
   const cikti = {};
   for (const [a, d] of Object.entries(ham || {})) cikti[a.toLowerCase()] = tekDeger(d);
   return cikti;
+}
+
+// Servis hata aninda dosya adiyla birlikte HTML hata sayfasi donebiliyor;
+// .xlsx adli ama '<' ile baslayan dosya tabloya gitmeden reddedilir.
+function bozukDosya(yol) {
+  if (!/\.xlsx$/i.test(yol)) return null;
+  let bas = '';
+  try {
+    const fd = fs.openSync(yol, 'r');
+    const tampon = Buffer.alloc(64);
+    const n = fs.readSync(fd, tampon, 0, 64, 0);
+    fs.closeSync(fd);
+    bas = tampon.subarray(0, n).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  } catch {
+    return null;
+  }
+  if (bas.startsWith('<')) {
+    return 'OSOS servisi dosya yerine hata sayfası gönderdi (Excel değil).';
+  }
+  return null;
 }
 
 function iptalHatasi() {
@@ -267,6 +289,8 @@ function dogrudanIndir(hedefUrl, klasor, log, ilkYanitMs = ILK_YANIT_SURESI,
           return dur(coz, null);
         }
         const yol = hedef;
+        const bozuk = bozukDosya(yol);
+        if (bozuk) return dur(red, new Error(bozuk));
         hedef = null;
         log(`OSOS servisi: adres doğrudan dosya verdi (${path.basename(yol)}).`);
         return dur(coz, { dosya: yol, ad: path.basename(yol), boyut });
@@ -278,32 +302,12 @@ function dogrudanIndir(hedefUrl, klasor, log, ilkYanitMs = ILK_YANIT_SURESI,
   });
 }
 
-async function indir({
-  url, klasor, dugme = '', aralik = null,
-  sayfaMs = VARSAYILAN_SAYFA_MS, gorunur = false, kapat = true, log = () => { },
-  denemeArasiMs = DENEME_ARASI_MS, iptal = () => false,
+// Tek deneme: once duz http, adres sayfa dondururse pencerede dugmeye basilir.
+async function birDeneme({
+  hedefUrl, klasor, dugme, sayfaMs, gorunur, kapat, log, iptal,
 }) {
-  if (!url) throw new Error('OSOS servisi adresi tanımlı değil.');
-  fs.mkdirSync(klasor, { recursive: true });
-  const hedefUrl = adresiCoz(url, aralik);
-
-  let dogrudan = null;
-  let sonHata = null;
-  for (let deneme = 1; deneme <= DENEME_SAYISI; deneme++) {
-    try {
-      dogrudan = await dogrudanIndir(hedefUrl, klasor, log,
-        Math.max(ILK_YANIT_SURESI, sayfaMs), iptal);
-      sonHata = null;
-      break;
-    } catch (e) {
-      sonHata = e;
-      if (e.iptal || deneme >= DENEME_SAYISI) break;
-      log(`OSOS servisi ${deneme}. denemede başarısız (${e.message}); `
-        + `${Math.round(denemeArasiMs / 1000)} sn sonra yeniden denenecek.`);
-      await uyu(denemeArasiMs);
-    }
-  }
-  if (sonHata) throw sonHata;
+  const dogrudan = await dogrudanIndir(hedefUrl, klasor, log,
+    Math.max(ILK_YANIT_SURESI, sayfaMs), iptal);
   if (dogrudan) return dogrudan;
   if (iptal()) throw iptalHatasi();
   log('OSOS servisi: adres sayfa döndürdü, indirme düğmesi aranacak.');
@@ -343,9 +347,11 @@ async function indir({
         `${YARDIM}\n${TIKLA(dugme, DUGME_DESENI)}`, true
       );
       if (!tiklanan) {
-        throw new Error('OSOS servisinde indirme düğmesi bulunamadı. '
+        const e = new Error('OSOS servisinde indirme düğmesi bulunamadı. '
           + 'Ayarlar\'daki "OSOS servisi indirme düğmesi" alanına düğmenin kimliğini '
           + 'ya da CSS seçicisini yazın.');
+        e.kalici = true;
+        throw e;
       }
       log(`OSOS servisi: "${tiklanan.metin || tiklanan.id}" düğmesine basıldı`
         + `${tiklanan.secici ? ' (ayarlardaki seçici)' : ''}.`);
@@ -361,6 +367,11 @@ async function indir({
       sozu.then(() => clearTimeout(sayac), () => clearTimeout(sayac));
     });
     const dosya = await Promise.race([sozu, zamanAsimi]);
+    const bozuk = bozukDosya(dosya.dosya);
+    if (bozuk) {
+      try { fs.unlinkSync(dosya.dosya); } catch { }
+      throw new Error(bozuk);
+    }
     log(`OSOS servisinden dosya indi: ${dosya.ad} (${dosya.boyut} bayt)`);
     return dosya;
   } catch (e) {
@@ -370,6 +381,38 @@ async function indir({
     indirme.birak();
     if (kapat || hataOldu) {
       try { if (!pencere.isDestroyed()) pencere.destroy(); } catch { }
+    }
+  }
+}
+
+async function iptalliUyu(ms, iptal) {
+  const bitis = Date.now() + ms;
+  while (Date.now() < bitis) {
+    if (iptal()) throw iptalHatasi();
+    await uyu(Math.min(500, bitis - Date.now()));
+  }
+}
+
+async function indir({
+  url, klasor, dugme = '', aralik = null,
+  sayfaMs = VARSAYILAN_SAYFA_MS, gorunur = false, kapat = true, log = () => { },
+  denemeArasiMs = DENEME_ARASI_MS, denemeSayisi = DENEME_SAYISI, iptal = () => false,
+}) {
+  if (!url) throw new Error('OSOS servisi adresi tanımlı değil.');
+  fs.mkdirSync(klasor, { recursive: true });
+  const hedefUrl = adresiCoz(url, aralik);
+
+  for (let deneme = 1; ; deneme++) {
+    try {
+      return await birDeneme({
+        hedefUrl, klasor, dugme, sayfaMs, gorunur, kapat, log, iptal,
+      });
+    } catch (e) {
+      if (e.iptal || e.kalici || deneme >= denemeSayisi) throw e;
+      const bekleme = denemeArasiMs * 2 ** (deneme - 1);
+      log(`OSOS servisi ${deneme}. denemede başarısız (${e.message}); `
+        + `${Math.round(bekleme / 1000)} sn sonra yeniden denenecek.`);
+      await iptalliUyu(bekleme, iptal);
     }
   }
 }

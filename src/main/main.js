@@ -787,7 +787,7 @@ async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
   const ososKlasor = fs.mkdtempSync(path.join(app.getPath('userData'), 'osos-'));
   let portalDustu = false;
   kayit('OSOS servisi dosyası portal raporlarıyla paralel indiriliyor.');
-  const ososSozu = servisIndir.indir({
+  const ososSecenek = {
     url: ayarlar.ososUrl,
     dugme: ayarlar.ososDugme,
     klasor: ososKlasor,
@@ -796,8 +796,8 @@ async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
     gorunur: ayarlar.gorunur,
     kapat: true,
     log: kayit,
-    iptal: () => portalDustu,
-  });
+  };
+  const ososSozu = servisIndir.indir({ ...ososSecenek, iptal: () => portalDustu });
   // Portal once patlarsa bu soz sahipsiz kalmasin.
   ososSozu.catch(() => { });
 
@@ -823,7 +823,17 @@ async function binaTablosuHazirla({ numara, onayKodu, ilerleme }) {
     if (!ihbar || !ihbar.dosya) throw new Error('AYS İhbar Takip raporu indirilemedi.');
     if (!formDetay || !formDetay.dosya) throw new Error('AYS Kesintiler Form Detay raporu indirilemedi.');
     if (!baglanti || !baglanti.dosya) throw new Error('AYS Osos Bağlanma Oran raporu indirilemedi.');
-    const inen = await ososSozu;
+    let inen;
+    try {
+      inen = await ososSozu;
+    } catch (e) {
+      // Portal raporlari (~15 dk) hazir; servis o arada dusmus olabilir.
+      // Butun isi bastan almak yerine yalniz OSOS'u bir tur daha deniyoruz.
+      if (e.iptal || e.kalici) throw e;
+      kayit(`OSOS servisi portal çalışırken indirilemedi (${e.message}); `
+        + 'raporlar hazır, OSOS bir tur daha deneniyor.');
+      inen = await servisIndir.indir(ososSecenek);
+    }
     const tasinan = ososuTasi(inen.dosya, sonuc.klasor);
     osos = { ...inen, dosya: tasinan, ad: path.basename(tasinan) };
     kayit(`OSOS servisi dosyası hazır: ${osos.ad} (${osos.boyut} bayt).`);

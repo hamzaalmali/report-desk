@@ -980,16 +980,55 @@ async function calistir(istek) {
       return { id, yontem, deger };
     };
 
+    // Rapor ya da il kodu secilince form kismi postback ile yeniden ciziliyor;
+    // tam o sirada bakilirsa kutular yok gorunuyor ya da cerceve betigi
+    // reddediyor. O yuzden dene() ile (hata firlatmadan) okunuyor.
     const tarihDoldur = async (kutular, parca) => {
       for (const id of kutular) {
         if (!await dene(`!!window.__rd.bul(${JSON.stringify(id + '_dateInput')})`)) continue;
-        const deger = await js(
+        const deger = await dene(
           `window.__rd.tarih(${JSON.stringify(id)}, ${JSON.stringify(parca.metin)},`
           + ` ${parca.gun}, ${parca.ay}, ${parca.yil})`
         );
         if (deger) return { id, deger };
       }
       return null;
+    };
+
+    const tarihOku = (id) => dene(`(function () {`
+      + ` var g = window.__rd.bul(${JSON.stringify(id + '_dateInput')});`
+      + ' return g ? String(g.value || "").trim() : null; })()');
+
+    // Kutular gelene ve yazilan deger postback'ten sonra da yerinde kalana
+    // kadar birkac kez denenir. Deger farkli bicimde gorunse de kutular
+    // bulunduysa eskisi gibi devam edilir; hata yalniz kutu hic yoksa verilir.
+    const tarihleriDoldur = async () => {
+      const bitis = Date.now() + Math.max(OGE_SURESI, sayfaMs / 3);
+      let bas = null;
+      let son = null;
+      for (let tur = 1; ; tur++) {
+        await sakinlesme();
+        bas = await tarihDoldur(BAS_TARIH_KUTULARI, aralik.bas);
+        son = await tarihDoldur(SON_TARIH_KUTULARI, aralik.son);
+        if (bas && son) {
+          await uyu(400);
+          await sakinlesme();
+          const b = await tarihOku(bas.id);
+          const s = await tarihOku(son.id);
+          if (b === aralik.bas.metin && s === aralik.son.metin) {
+            if (tur > 1) log(`Portal: tarih kutuları ${tur}. denemede dolduruldu.`);
+            return { bas: { ...bas, deger: b }, son: { ...son, deger: s } };
+          }
+          if (Date.now() >= bitis) {
+            log(`Portal: tarih kutularında "${b}" / "${s}" görünüyor `
+              + `(istenen ${aralik.bas.metin} / ${aralik.son.metin}); yine de devam ediliyor.`);
+            return { bas: { ...bas, deger: b || bas.deger }, son: { ...son, deger: s || son.deger } };
+          }
+        } else if (Date.now() >= bitis) {
+          return { bas, son };
+        }
+        await uyu(1000);
+      }
     };
 
     await adim('tarihler' + ek, 'Form dolduruluyor' + etiket, async () => {
@@ -1003,8 +1042,7 @@ async function calistir(istek) {
         }
       }
 
-      const bas = await tarihDoldur(BAS_TARIH_KUTULARI, aralik.bas);
-      const son = await tarihDoldur(SON_TARIH_KUTULARI, aralik.son);
+      const { bas, son } = await tarihleriDoldur();
       await uyu(400);
 
       let saatKutusu = null;

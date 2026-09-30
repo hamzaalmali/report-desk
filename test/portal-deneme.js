@@ -83,6 +83,8 @@ const OSOS_SERVISI = (tarih) => SAYFA('OSOS Servisi', `
 
 const OSOS_DUGMESIZ = SAYFA('OSOS Servisi', '<h1>OSOS</h1><div>burada düğme yok</div>');
 
+const GEC_TARIH_MS = 6000;
+
 const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
   <h1>Rapor</h1>
   <div id="klasikForm">
@@ -149,6 +151,15 @@ const RAPOR_SAYFASI = SAYFA('Rapor Ekrani', `
       var atilacak = deger === ${JSON.stringify(RAPOR_TSUIS)} ? 'klasikForm' : 'tsuisForm';
       var e = document.getElementById(atilacak);
       if (e) e.parentNode.removeChild(e);
+      // Gercek portalda tarih kutulari kismi postback ile gec geliyor.
+      if (atilacak === 'klasikForm') {
+        var tf = document.getElementById('tsuisForm');
+        var kutular = [].slice.call(tf.querySelectorAll('input[id$="_dateInput"]'));
+        kutular.forEach(function (k) { tf.removeChild(k); });
+        setTimeout(function () {
+          kutular.forEach(function (k) { tf.appendChild(k); });
+        }, ${GEC_TARIH_MS});
+      }
     };
     document.getElementById('ctl00_ContentPlaceHolder1_cmbRaporlar_DropDown')
       .addEventListener('click', function (o) {
@@ -285,6 +296,17 @@ function sunucuKur(kayit) {
       kayit.ososTitrek = (kayit.ososTitrek || 0) + 1;
       if (kayit.ososTitrek < 3) { istek.socket.destroy(); return null; }
       return yolla('titrek-inen-icerik', 'application/octet-stream', {
+        'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
+      });
+    }
+    if (url.pathname === '/osos-bozuk') {
+      kayit.ososBozuk = (kayit.ososBozuk || 0) + 1;
+      if (kayit.ososBozuk < 2) {
+        return yolla('<html><body>Sunucu hatası</body></html>', 'application/octet-stream', {
+          'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
+        });
+      }
+      return yolla('PK-duzgun-icerik', 'application/octet-stream', {
         'Content-Disposition': 'attachment; filename="osos_rapor.xlsx"',
       });
     }
@@ -620,6 +642,21 @@ app.whenReady().then(async () => {
       && fs.readFileSync(titrek.dosya, 'utf8') === 'titrek-inen-icerik'
       && kayit.ososTitrek === 3,
       `${kayit.ososTitrek} deneme — ${titrek && (titrek.ad || titrek.message)}`);
+
+    let bozuk = null;
+    const bozukKlasor = path.join(servisKlasor, 'bozuk');
+    try {
+      bozuk = await servisIndir.indir({
+        url: `${kok}/osos-bozuk`, klasor: bozukKlasor,
+        gorunur, kapat: true, denemeArasiMs: 50, log: () => { },
+      });
+    } catch (e) {
+      bozuk = e;
+    }
+    kontrol('Excel yerine hata sayfası gelirse reddedilip yeniden deneniyor',
+      bozuk && bozuk.dosya && fs.readFileSync(bozuk.dosya, 'utf8') === 'PK-duzgun-icerik'
+      && kayit.ososBozuk === 2 && fs.readdirSync(bozukKlasor).length === 1,
+      `${kayit.ososBozuk} deneme — ${bozuk && (bozuk.ad || bozuk.message)}`);
 
     let yonlendirme = null;
     try {
